@@ -520,6 +520,225 @@ class QueueManager:
                 mapping[(ch, start)] = r
         return mapping
 
+    def find_scheduling_conflicts(
+        self,
+        channel: str,
+        start_iso: str,
+        duration_iso: str,
+        buffer_mins: int = 0,
+        total_tuners: int = 1
+    ) -> List[Dict[str, Any]]:
+        """
+        Detects if scheduling a new recording on `channel` from `start_iso` for `duration_iso` (+buffer)
+        would exceed hardware tuner capacity due to overlap with existing active recordings on different channels.
+
+        Returns a list of conflict dicts with conflict details, overlap minutes, and suggested cut/delay values.
+        """
+        try:
+            new_start = datetime.fromisoformat(start_iso)
+            parts = [int(p) for p in duration_iso.split(":")]
+            h = parts[0]
+            m = parts[1] if len(parts) > 1 else 0
+            s = parts[2] if len(parts) > 2 else 0
+            new_total_secs = h * 3600 + m * 60 + s + (buffer_mins * 60)
+            new_end = new_start + timedelta(seconds=new_total_secs)
+        except Exception:
+            return []
+
+        active = self.list_queue(include_completed=False)
+        target_ch = channel.strip().lower()
+
+        overlapping = []
+        for rec in active:
+            r_ch = rec.get("channel", "").strip().lower()
+            if r_ch == target_ch:
+                continue
+            try:
+                r_start = datetime.fromisoformat(rec["start_iso"])
+                r_end = datetime.fromisoformat(rec["end_iso"])
+            except Exception:
+                continue
+
+            if r_start < new_end and new_start < r_end:
+                overlapping.append((rec, r_start, r_end))
+
+        if not overlapping:
+            return []
+
+        distinct_overlapping_channels = {r["channel"].strip().lower() for r, _, _ in overlapping}
+        if len(distinct_overlapping_channels) < max(1, total_tuners):
+            return []
+
+        conflicts = []
+        for rec, r_start, r_end in overlapping:
+            overlap_start = max(r_start, new_start)
+            overlap_end = min(r_end, new_end)
+            overlap_secs = int((overlap_end - overlap_start).total_seconds())
+            overlap_mins = max(1, round(overlap_secs / 60))
+
+            if r_start < new_start and r_end <= new_end:
+                conflict_type = "preceding_overlaps_start"
+                earlier_rec = "existing"
+                target_cut = new_start - timedelta(seconds=5)
+                cut_secs = max(30, int((target_cut - r_start).total_seconds()))
+                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
+                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_secs = max(30, int((new_end - r_end).total_seconds()))
+                delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
+            elif new_start < r_start and new_end <= r_end:
+                conflict_type = "upcoming_overlaps_end"
+                earlier_rec = "requested"
+                target_cut = r_start - timedelta(seconds=5)
+                cut_secs = max(30, int((target_cut - new_start).total_seconds()))
+                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
+                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_secs = max(30, int((r_end - new_end).total_seconds()))
+                delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
+            elif r_start <= new_start and new_end <= r_end:
+                conflict_type = "encloses_new"
+                earlier_rec = "existing"
+                target_cut = new_start - timedelta(seconds=5)
+                cut_secs = max(30, int((target_cut - r_start).total_seconds()))
+                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
+                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_dur = "00:30:00"
+            else:
+                conflict_type = "encloses_existing"
+                earlier_rec = "requested"
+                target_cut = r_start - timedelta(seconds=5)
+                cut_secs = max(30, int((target_cut - new_start).total_seconds()))
+                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
+                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
+                delay_dur = "00:30:00"
+
+            conflicts.append({
+                "recording": rec,
+                "overlap_secs": overlap_secs,
+                "overlap_mins": overlap_mins,
+                "conflict_type": conflict_type,
+                "earlier_rec": earlier_rec,
+                "cut_early_end_iso": cut_end,
+                "cut_early_dur_iso": cut_dur,
+                "delay_start_iso": delay_start,
+                "delay_dur_iso": delay_dur,
+            })
+
+        return conflicts
+
+    def trim_recording_end(
+        self,
+        queue_id: int,
+        new_end_iso: str,
+        new_dur_iso: str,
+        dbus_client: Optional[Any] = None
+    ) -> bool:
+        """
+        Trims the end time of an existing queued or armed recording to avoid tuner collision.
+        """
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recording_queue WHERE id = ?", (queue_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        rec = dict(row)
+        cur.execute("""
+            UPDATE recording_queue
+            SET duration_iso = ?, end_iso = ?, buffer_mins = 0
+            WHERE id = ?
+        """, (new_dur_iso, new_end_iso, queue_id))
+        conn.commit()
+        conn.close()
+
+        if rec.get("status") == "ARMED" and rec.get("kaffeine_key") and dbus_client:
+            try:
+                dbus_client.remove_recording(rec["kaffeine_key"])
+                new_key = dbus_client.schedule_recording(
+                    rec["title"], rec["channel"],
+                    rec["start_iso"], new_dur_iso, 0
+                )
+                if new_key and new_key > 0:
+                    conn = self._get_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE recording_queue SET kaffeine_key = ? WHERE id = ?", (new_key, queue_id))
+                    conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"Error updating Kaffeine timer for '{rec.get('title')}': {e}")
+
+        if rec.get("kaffeine_key"):
+            try:
+                k_db = Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db"
+                if k_db.exists():
+                    k_conn = sqlite3.connect(str(k_db))
+                    k_cur = k_conn.cursor()
+                    k_cur.execute("UPDATE RecordingSchedule SET Duration = ? WHERE Id = ?", (new_dur_iso, rec["kaffeine_key"]))
+                    k_conn.commit()
+                    k_conn.close()
+            except Exception as e:
+                print(f"Error syncing trimmed duration to Kaffeine sqlite: {e}")
+
+        return True
+
+    def delay_recording_start(
+        self,
+        queue_id: int,
+        new_start_iso: str,
+        new_dur_iso: str,
+        dbus_client: Optional[Any] = None
+    ) -> bool:
+        """
+        Delays the start time of an existing queued recording.
+        """
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recording_queue WHERE id = ?", (queue_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        rec = dict(row)
+        try:
+            dt_start = datetime.fromisoformat(new_start_iso)
+            start_display = dt_start.strftime("%Y-%m-%d %I:%M %p")
+        except Exception:
+            start_display = new_start_iso
+
+        cur.execute("""
+            UPDATE recording_queue
+            SET start_iso = ?, duration_iso = ?, start_time_local = ?, buffer_mins = 0
+            WHERE id = ?
+        """, (new_start_iso, new_dur_iso, start_display, queue_id))
+        conn.commit()
+        conn.close()
+
+        if rec.get("status") == "ARMED" and rec.get("kaffeine_key") and dbus_client:
+            try:
+                dbus_client.remove_recording(rec["kaffeine_key"])
+                new_key = dbus_client.schedule_recording(
+                    rec["title"], rec["channel"],
+                    new_start_iso, new_dur_iso, 0
+                )
+                if new_key and new_key > 0:
+                    conn = self._get_connection()
+                    cur = conn.cursor()
+                    cur.execute("UPDATE recording_queue SET kaffeine_key = ? WHERE id = ?", (new_key, queue_id))
+                    conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"Error updating Kaffeine timer for '{rec.get('title')}': {e}")
+
+        return True
+
     def get_history_map(self, limit: int = 200) -> Dict[Any, Dict[str, Any]]:
         """
         Returns a mapping of (channel_lower, start_iso[:16]) -> history_dict

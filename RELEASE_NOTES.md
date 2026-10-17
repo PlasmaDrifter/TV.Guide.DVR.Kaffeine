@@ -2,6 +2,8 @@
 
 ## v0.8.15
 
+- **Multi-Channel Recording Conflict Resolution**: Added scheduling conflict detection and interactive resolution dialog (`RecordingConflictDialog`) when scheduling recordings that overlap across different channels on tuner-constrained systems. Automatically calculates trimming options to stop the preceding show early or delay the upcoming show, or cancel the request.
+- **Left-Aligned Guide Grid Time Headers**: Pinned horizontal TV guide grid time column headers to the left of each section with 10px padding matching the program card indentation below it.
 - **Customizable Keyboard Shortcuts & Navigation**: Added full keyboard shortcut customization under Settings > Keyboard Shortcuts with individual editable fields for Guide Navigation Keys (Up, Down, Left, Right), program action hotkeys, view toggles, and global shortcuts.
 - **Dedicated Guide Grid & List Keyboard Navigation**: Arrow keys strictly navigate guide grid tiles and list rows, updating tile highlight, program details, and scrolling without triggering accidental playback or popups. Pressing Down initializes keyboard access to the guide when nothing is selected.
 - **Remote Web Access Security & Subnet Firewall Rules**: Updated firewall guidance in Remote Web Access settings and the Help guide with explicit instructions for trusted local subnets (e.g. `192.168.1.0/24`) without exposing public ports, highlighting zero-configuration remote access via Tailscale.

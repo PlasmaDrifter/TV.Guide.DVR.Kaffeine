@@ -41,6 +41,7 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QIcon,
+    QKeyEvent,
     QKeySequence,
     QPainter,
     QPalette,
@@ -79,6 +80,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QProxyStyle,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizeGrip,
     QSizePolicy,
@@ -90,6 +92,7 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate,
     QStyleFactory,
     QStyleOptionComboBox,
+    QStyleOptionHeader,
     QStyleOptionViewItem,
     QStylePainter,
     QTableWidget,
@@ -2152,6 +2155,181 @@ class AdjustBufferDialog(BaseFramelessDialog):
 
     def get_buffer(self) -> int:
         return self.buf_spin.value()
+
+
+class RecordingConflictDialog(BaseFramelessDialog):
+    """
+    Conflict resolution dialog when scheduling an overlapping show on a single tuner (or when all tuners are busy).
+    Presents clear comparison between the existing and requested recording, the exact overlap,
+    and 3 options:
+    1. Trim preceding show early (starts new show on time)
+    2. Start requested show late (lets preceding show finish in full)
+    3. Cancel
+    """
+    def __init__(
+        self,
+        conflict: Dict[str, Any],
+        requested_title: str,
+        requested_channel: str,
+        requested_start_iso: str,
+        requested_duration_iso: str,
+        total_tuners: int = 1,
+        parent=None
+    ):
+        super().__init__(parent)
+        self.conflict = conflict
+        self.resolution = "cancel"
+        self.setWindowTitle("Recording Schedule Conflict")
+        self.setMinimumWidth(530)
+
+        existing_rec = conflict["recording"]
+        overlap_mins = conflict.get("overlap_mins", 1)
+        earlier_rec = conflict.get("earlier_rec", "existing")
+
+        try:
+            ex_start_dt = datetime.fromisoformat(existing_rec["start_iso"])
+            ex_end_dt = datetime.fromisoformat(existing_rec["end_iso"])
+            ex_time_str = f"{ex_start_dt.strftime('%I:%M %p').lstrip('0')} – {ex_end_dt.strftime('%I:%M %p').lstrip('0')}"
+        except Exception:
+            ex_time_str = existing_rec.get("start_iso", "")
+
+        try:
+            req_start_dt = datetime.fromisoformat(requested_start_iso)
+            parts = [int(p) for p in requested_duration_iso.split(":")]
+            req_end_dt = req_start_dt + timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2] if len(parts) > 2 else 0)
+            req_time_str = f"{req_start_dt.strftime('%I:%M %p').lstrip('0')} – {req_end_dt.strftime('%I:%M %p').lstrip('0')}"
+        except Exception:
+            req_time_str = requested_start_iso
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+
+        # Header Title & Subtitle
+        header_box = QVBoxLayout()
+        header_box.setSpacing(4)
+        title_lbl = QLabel("<b>Hardware Tuner Conflict Detected</b>")
+        title_lbl.setStyleSheet("font-size: 16px; color: #ffffff;")
+        header_box.addWidget(title_lbl)
+
+        tuner_txt = f"All available TV tuners ({total_tuners}) are scheduled." if total_tuners > 1 else "Your TV tuner is already scheduled for another channel."
+        subtitle_lbl = QLabel(f"{tuner_txt} The requested program overlaps with an existing recording by <b>{overlap_mins} minute{'s' if overlap_mins != 1 else ''}</b>.")
+        subtitle_lbl.setWordWrap(True)
+        subtitle_lbl.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        header_box.addWidget(subtitle_lbl)
+        layout.addLayout(header_box)
+
+        # Comparison Card Frame
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background-color: #1e2433;
+                border: 1px solid #334155;
+                border-radius: 8px;
+            }
+        """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(8)
+
+        # Existing recording row
+        ex_row = QHBoxLayout()
+        ex_badge = QLabel(" Scheduled ")
+        ex_badge.setStyleSheet("background-color: #0284c7; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 4px;")
+        ex_text = QLabel(f"<b>{existing_rec.get('title')}</b> on <b>{existing_rec.get('channel')}</b> ({ex_time_str})")
+        ex_text.setStyleSheet("color: #e2e8f0; font-size: 12px;")
+        ex_row.addWidget(ex_badge)
+        ex_row.addWidget(ex_text, 1)
+        card_layout.addLayout(ex_row)
+
+        # Requested recording row
+        req_row = QHBoxLayout()
+        req_badge = QLabel(" Requested ")
+        req_badge.setStyleSheet("background-color: #f97316; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 4px;")
+        req_text = QLabel(f"<b>{requested_title}</b> on <b>{requested_channel}</b> ({req_time_str})")
+        req_text.setStyleSheet("color: #e2e8f0; font-size: 12px;")
+        req_row.addWidget(req_badge)
+        req_row.addWidget(req_text, 1)
+        card_layout.addLayout(req_row)
+
+        layout.addWidget(card)
+
+        # Options Header
+        opt_hdr = QLabel("<b>Choose how to resolve this conflict:</b>")
+        opt_hdr.setStyleSheet("font-size: 13px; color: #ffffff; margin-top: 4px;")
+        layout.addWidget(opt_hdr)
+
+        # Radio options
+        self.trim_radio = QRadioButton()
+        self.delay_radio = QRadioButton()
+        self.cancel_radio = QRadioButton("Do not schedule (Cancel)")
+
+        if earlier_rec == "existing":
+            self.trim_radio.setText(f"Cut preceding recording early (Record '{requested_title}' from the start)")
+            self.delay_radio.setText(f"Start requested recording {overlap_mins}m late (Let '{existing_rec.get('title')}' finish in full)")
+            trim_desc = f"Ends '{existing_rec.get('title')}' {overlap_mins} minutes early so '{requested_title}' can record in full starting on time."
+            delay_desc = f"Allows '{existing_rec.get('title')}' to record in full, starting '{requested_title}' {overlap_mins} minutes into the broadcast."
+        else:
+            self.trim_radio.setText(f"Cut requested recording early (Record '{existing_rec.get('title')}' from the start)")
+            self.delay_radio.setText(f"Start preceding recording {overlap_mins}m late (Record '{requested_title}' in full)")
+            trim_desc = f"Stops '{requested_title}' {overlap_mins} minutes early so '{existing_rec.get('title')}' can record in full starting on time."
+            delay_desc = f"Delays '{existing_rec.get('title')}' so '{requested_title}' can finish in full."
+
+        self.trim_radio.setChecked(True)
+        self.trim_radio.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
+        self.delay_radio.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
+        self.cancel_radio.setStyleSheet("font-size: 13px; color: #cbd5e1;")
+
+        radio_box = QVBoxLayout()
+        radio_box.setSpacing(6)
+
+        radio_box.addWidget(self.trim_radio)
+        lbl_trim_sub = QLabel(f"    {trim_desc}")
+        lbl_trim_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        lbl_trim_sub.setWordWrap(True)
+        radio_box.addWidget(lbl_trim_sub)
+
+        radio_box.addSpacing(4)
+        radio_box.addWidget(self.delay_radio)
+        lbl_delay_sub = QLabel(f"    {delay_desc}")
+        lbl_delay_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        lbl_delay_sub.setWordWrap(True)
+        radio_box.addWidget(lbl_delay_sub)
+
+        radio_box.addSpacing(4)
+        radio_box.addWidget(self.cancel_radio)
+
+        layout.addLayout(radio_box)
+
+        # Buttons
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
+        btns.addStretch()
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        self.cancel_btn.clicked.connect(self.reject)
+
+        self.confirm_btn = QPushButton("Confirm Resolution")
+        self.confirm_btn.setObjectName("primaryActionBtn")
+        self.confirm_btn.setStyleSheet("padding: 6px 16px; font-size: 13px; font-weight: bold;")
+        self.confirm_btn.clicked.connect(self._on_confirm)
+
+        btns.addWidget(self.cancel_btn)
+        btns.addWidget(self.confirm_btn)
+        layout.addLayout(btns)
+
+    def _on_confirm(self):
+        if self.trim_radio.isChecked():
+            self.resolution = "trim_preceding"
+        elif self.delay_radio.isChecked():
+            self.resolution = "delay_upcoming"
+        else:
+            self.resolution = "cancel"
+        self.accept()
+
+    def get_resolution(self) -> str:
+        return self.resolution
 
 
 class CollapsibleHeaderButton(QToolButton):
@@ -5206,6 +5384,7 @@ QTableWidget#guideGridTable QHeaderView::section:horizontal {{
     font-weight: bold;
     font-size: 14px;
     padding: 6px;
+    padding-left: 10px;
     border: 1px solid {tokens["table_gridline"]};
     border-top: none;
 }}
@@ -6255,6 +6434,10 @@ class MainWindow(QMainWindow):
                 else:
                     grid_headers.append(f"{h%12 or 12}:{m:02d} AM")
         self.guide_grid_table.setHorizontalHeaderLabels(grid_headers)
+        for col in range(self.guide_grid_table.columnCount()):
+            it = self.guide_grid_table.horizontalHeaderItem(col)
+            if it:
+                it.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.guide_grid_table.horizontalHeader().setDefaultSectionSize(200)
         self.guide_grid_table.horizontalHeader().setHighlightSections(False)
         self.guide_grid_table.verticalHeader().setDefaultSectionSize(62)
@@ -12232,7 +12415,7 @@ class MainWindow(QMainWindow):
             if cur_hdr_sizes != (hdr_font_sz, v_hdr_font_sz):
                 self._cur_hdr_sizes = (hdr_font_sz, v_hdr_font_sz)
                 self.guide_grid_table.setStyleSheet(
-                    f"QTableWidget#guideGridTable QHeaderView::section:horizontal {{ font-size: {hdr_font_sz}px; color: #e2e8f0; }} "
+                    f"QTableWidget#guideGridTable QHeaderView::section:horizontal {{ font-size: {hdr_font_sz}px; color: #e2e8f0; padding-left: 10px; }} "
                     f"QTableWidget#guideGridTable QHeaderView::section:vertical {{ font-size: {v_hdr_font_sz}px; }}"
                 )
             self.guide_grid_table.viewport().update()
@@ -13099,6 +13282,10 @@ class MainWindow(QMainWindow):
                 else:
                     grid_headers.append(f"{h%12 or 12}:{m:02d} AM")
         self.guide_grid_table.setHorizontalHeaderLabels(grid_headers)
+        for col in range(self.guide_grid_table.columnCount()):
+            it = self.guide_grid_table.horizontalHeaderItem(col)
+            if it:
+                it.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
         cut_dt = base_dt + timedelta(hours=28)
 
@@ -13392,13 +13579,13 @@ class MainWindow(QMainWindow):
 
         prog = item.data(Qt.ItemDataRole.UserRole)
         cur_sel = getattr(self, "selected_grid_program", None)
-
+        is_user_click = (activate is not False)
         if activate is None:
             activate = getattr(self.config_mgr, "guide_single_click_play", True)
 
         # Clicking the currently selected program tile again toggles / unhighlights it
         # (Only applies when activated/clicked with mouse, never during keyboard navigation)
-        if activate and cur_sel is not None:
+        if is_user_click and cur_sel is not None:
             is_same = False
             if cur_sel is prog or cur_sel == prog:
                 is_same = True
@@ -14972,6 +15159,50 @@ class MainWindow(QMainWindow):
             buf_mins = self.config_mgr.end_buffer_mins
         else:
             buf_mins = 0
+
+        # Check for scheduling conflicts across channels
+        effective_tuners = self.config_mgr.get_effective_tuner_count() if self.config_mgr else 1
+        conflicts = self.queue_mgr.find_scheduling_conflicts(
+            channel, start_iso, duration_iso, buffer_mins=buf_mins, total_tuners=effective_tuners
+        )
+        if conflicts:
+            conflict = conflicts[0]
+            dlg = RecordingConflictDialog(
+                conflict=conflict,
+                requested_title=rec_title,
+                requested_channel=channel,
+                requested_start_iso=start_iso,
+                requested_duration_iso=duration_iso,
+                total_tuners=effective_tuners,
+                parent=self
+            )
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                self.status_bar.showMessage("Recording cancelled due to schedule conflict.", 4000)
+                return
+
+            resolution = dlg.get_resolution()
+            if resolution == "trim_preceding":
+                if conflict["earlier_rec"] == "existing":
+                    ex_id = conflict["recording"]["id"]
+                    dbus_c = getattr(self.watcher, "dbus_client", None) if hasattr(self, "watcher") else None
+                    self.queue_mgr.trim_recording_end(
+                        ex_id, conflict["cut_early_end_iso"], conflict["cut_early_dur_iso"], dbus_client=dbus_c
+                    )
+                else:
+                    duration_iso = conflict["cut_early_dur_iso"]
+            elif resolution == "delay_upcoming":
+                if conflict["earlier_rec"] == "existing":
+                    start_iso = conflict["delay_start_iso"]
+                    duration_iso = conflict["delay_dur_iso"]
+                else:
+                    ex_id = conflict["recording"]["id"]
+                    dbus_c = getattr(self.watcher, "dbus_client", None) if hasattr(self, "watcher") else None
+                    self.queue_mgr.delay_recording_start(
+                        ex_id, conflict["delay_start_iso"], conflict["delay_dur_iso"], dbus_client=dbus_c
+                    )
+            elif resolution == "cancel":
+                self.status_bar.showMessage("Recording cancelled due to schedule conflict.", 4000)
+                return
 
         try:
             lead = self.config_mgr.lead_time_mins

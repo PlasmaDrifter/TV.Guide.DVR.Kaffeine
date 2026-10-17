@@ -2309,16 +2309,42 @@ class RecordingConflictDialog(BaseFramelessDialog):
         self.delay_radio = QRadioButton()
         self.cancel_radio = QRadioButton("Do not schedule (Cancel)")
 
+        can_delay = conflict.get("can_delay", True)
+        can_delay_req = conflict.get("can_delay_requested", False)
+        can_delay_ex = conflict.get("can_delay_existing", False)
+
         if earlier_rec == "existing":
             self.trim_radio.setText(f"Cut preceding recording early (Record '{requested_title}' from the start)")
-            self.delay_radio.setText(f"Start requested recording {overlap_mins}m late (Let '{existing_rec.get('title')}' finish in full)")
             trim_desc = f"Ends '{existing_rec.get('title')}' {overlap_mins} minutes early so '{requested_title}' can record in full starting on time."
-            delay_desc = f"Allows '{existing_rec.get('title')}' to record in full, starting '{requested_title}' {overlap_mins} minutes into the broadcast."
+            if can_delay:
+                self.delay_radio.setText(f"Start requested recording {overlap_mins}m late (Let '{existing_rec.get('title')}' finish in full)")
+                delay_desc = f"Allows '{existing_rec.get('title')}' to record in full, starting '{requested_title}' {overlap_mins} minutes into the broadcast."
+            else:
+                self.delay_radio.setText(f"Keep '{existing_rec.get('title')}' in full (Do not record '{requested_title}')")
+                delay_desc = f"'{existing_rec.get('title')}' runs for the entire duration of '{requested_title}', so '{requested_title}' cannot be delayed."
+        elif earlier_rec == "same_time":
+            if can_delay_ex:
+                self.trim_radio.setText(f"Record '{requested_title}' from the start (Delay '{existing_rec.get('title')}')")
+                trim_desc = f"Starts '{requested_title}' on time. Records the remainder of '{existing_rec.get('title')}' after '{requested_title}' finishes."
+            else:
+                self.trim_radio.setText(f"Record '{requested_title}' in full (Cancel '{existing_rec.get('title')}')")
+                trim_desc = f"Cancels '{existing_rec.get('title')}' to free the tuner, recording '{requested_title}' in full."
+
+            if can_delay_req:
+                self.delay_radio.setText(f"Keep '{existing_rec.get('title')}' in full (Start '{requested_title}' late)")
+                delay_desc = f"Records '{existing_rec.get('title')}' in full. Starts '{requested_title}' after '{existing_rec.get('title')}' finishes."
+            else:
+                self.delay_radio.setText(f"Keep '{existing_rec.get('title')}' in full (Do not record '{requested_title}')")
+                delay_desc = f"'{requested_title}' finishes before or when '{existing_rec.get('title')}' ends, so it cannot be delayed."
         else:
             self.trim_radio.setText(f"Cut requested recording early (Record '{existing_rec.get('title')}' from the start)")
-            self.delay_radio.setText(f"Start preceding recording {overlap_mins}m late (Record '{requested_title}' in full)")
             trim_desc = f"Stops '{requested_title}' {overlap_mins} minutes early so '{existing_rec.get('title')}' can record in full starting on time."
-            delay_desc = f"Delays '{existing_rec.get('title')}' so '{requested_title}' can finish in full."
+            if can_delay:
+                self.delay_radio.setText(f"Start preceding recording {overlap_mins}m late (Record '{requested_title}' in full)")
+                delay_desc = f"Delays '{existing_rec.get('title')}' so '{requested_title}' can finish in full."
+            else:
+                self.delay_radio.setText(f"Record '{requested_title}' in full (Cancel '{existing_rec.get('title')}')")
+                delay_desc = f"'{requested_title}' runs for the entire duration of '{existing_rec.get('title')}', so '{existing_rec.get('title')}' cannot be delayed."
 
         self.trim_radio.setChecked(True)
         self.trim_radio.setStyleSheet(radio_ss)
@@ -15324,18 +15350,40 @@ class MainWindow(QMainWindow):
                     self.queue_mgr.trim_recording_end(
                         ex_id, conflict["cut_early_end_iso"], conflict["cut_early_dur_iso"], dbus_client=dbus_c
                     )
+                elif conflict["earlier_rec"] == "same_time":
+                    ex_id = conflict["recording"]["id"]
+                    dbus_c = getattr(self.watcher, "dbus_client", None) if hasattr(self, "watcher") else None
+                    if conflict.get("can_delay_existing"):
+                        self.queue_mgr.delay_recording_start(
+                            ex_id, conflict["delay_existing_start_iso"], conflict["delay_existing_dur_iso"], dbus_client=dbus_c
+                        )
+                    else:
+                        self.queue_mgr.remove_recording(ex_id, dbus_client=dbus_c)
                 else:
                     duration_iso = conflict["cut_early_dur_iso"]
             elif resolution == "delay_upcoming":
                 if conflict["earlier_rec"] == "existing":
+                    if not conflict.get("can_delay", True):
+                        self.status_bar.showMessage("Recording cancelled due to schedule conflict.", 4000)
+                        return
                     start_iso = conflict["delay_start_iso"]
                     duration_iso = conflict["delay_dur_iso"]
+                elif conflict["earlier_rec"] == "same_time":
+                    if conflict.get("can_delay_requested"):
+                        start_iso = conflict["delay_requested_start_iso"]
+                        duration_iso = conflict["delay_requested_dur_iso"]
+                    else:
+                        self.status_bar.showMessage("Recording cancelled due to schedule conflict.", 4000)
+                        return
                 else:
                     ex_id = conflict["recording"]["id"]
                     dbus_c = getattr(self.watcher, "dbus_client", None) if hasattr(self, "watcher") else None
-                    self.queue_mgr.delay_recording_start(
-                        ex_id, conflict["delay_start_iso"], conflict["delay_dur_iso"], dbus_client=dbus_c
-                    )
+                    if conflict.get("can_delay", True):
+                        self.queue_mgr.delay_recording_start(
+                            ex_id, conflict["delay_start_iso"], conflict["delay_dur_iso"], dbus_client=dbus_c
+                        )
+                    else:
+                        self.queue_mgr.remove_recording(ex_id, dbus_client=dbus_c)
             elif resolution == "cancel":
                 self.status_bar.showMessage("Recording cancelled due to schedule conflict.", 4000)
                 return

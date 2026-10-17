@@ -369,3 +369,204 @@ def test_guide_grid_horizontal_headers_left_aligned(qtbot, isolated_config: Conf
         assert item.textAlignment() == (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 
+def test_find_scheduling_conflicts_same_time_start(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+    t_start = "2026-10-17T20:00:00"
+
+    # Queue 30m show on ABC (20:00 - 20:30)
+    id_ff = qm.add_recording(
+        title="Family Feud",
+        channel="ABC",
+        start_iso=t_start,
+        duration_iso="00:30:00",
+        buffer_mins=0
+    )
+
+    # 1. Requested 60m show on NBC (20:00 - 21:00)
+    conflicts_60m = qm.find_scheduling_conflicts(
+        channel="NBC",
+        start_iso=t_start,
+        duration_iso="01:00:00",
+        total_tuners=1
+    )
+    assert len(conflicts_60m) == 1
+    c1 = conflicts_60m[0]
+    assert c1["earlier_rec"] == "same_time"
+    assert c1["conflict_type"] == "exact_start_conflict"
+    assert c1["can_delay_requested"] is True
+    assert c1["delay_requested_start_iso"] == "2026-10-17T20:30:00"
+    assert c1["delay_requested_dur_iso"] == "00:30:00"
+    assert c1["can_delay_existing"] is False
+    assert c1["delay_existing_start_iso"] == ""
+
+    # 2. Requested 30m show on NBC (20:00 - 20:30)
+    conflicts_30m = qm.find_scheduling_conflicts(
+        channel="NBC",
+        start_iso=t_start,
+        duration_iso="00:30:00",
+        total_tuners=1
+    )
+    assert len(conflicts_30m) == 1
+    c2 = conflicts_30m[0]
+    assert c2["earlier_rec"] == "same_time"
+    assert c2["can_delay_requested"] is False
+    assert c2["can_delay_existing"] is False
+
+    # 3. If existing was 60m and requested was 30m
+    qm.remove_recording(id_ff)
+    qm.add_recording(
+        title="Dateline",
+        channel="NBC",
+        start_iso=t_start,
+        duration_iso="01:00:00",
+        buffer_mins=0
+    )
+    conflicts_shorter = qm.find_scheduling_conflicts(
+        channel="ABC",
+        start_iso=t_start,
+        duration_iso="00:30:00",
+        total_tuners=1
+    )
+    assert len(conflicts_shorter) == 1
+    c3 = conflicts_shorter[0]
+    assert c3["earlier_rec"] == "same_time"
+    assert c3["can_delay_requested"] is False
+    assert c3["can_delay_existing"] is True
+    assert c3["delay_existing_start_iso"] == "2026-10-17T20:30:00"
+    assert c3["delay_existing_dur_iso"] == "00:30:00"
+
+
+def test_record_selected_guide_item_same_time_record_new(qtbot, isolated_config: ConfigManager, isolated_queue_mgr: QueueManager):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.config_mgr = isolated_config
+    win.queue_mgr = isolated_queue_mgr
+    win.watcher.queue_mgr = isolated_queue_mgr
+
+    base_time = datetime.now() + timedelta(days=1)
+    t_start = base_time.replace(hour=20, minute=0, second=0, microsecond=0)
+
+    # Queue 30m show on ABC (Family Feud)
+    id_existing = isolated_queue_mgr.add_recording(
+        title="Family Feud",
+        channel="ABC",
+        start_iso=t_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        duration_iso="00:30:00",
+        buffer_mins=0
+    )
+
+    prog_dateline = {
+        "show_title": "Dateline",
+        "episode_title": "Mystery",
+        "kaffeine_channel": "NBC",
+        "start_iso": t_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "duration_iso": "01:00:00",
+        "_category": "tvshows"
+    }
+
+    # Simulate user choosing option 1 (trim_preceding: record new show from start)
+    def mock_conflict_dialog(*args, **kwargs):
+        dlg = MagicMock()
+        dlg.exec.return_value = QDialog.DialogCode.Accepted
+        dlg.get_resolution.return_value = "trim_preceding"
+        return dlg
+
+    import kaffeine_dvr.gui
+    orig_dialog = kaffeine_dvr.gui.RecordingConflictDialog
+    kaffeine_dvr.gui.RecordingConflictDialog = mock_conflict_dialog
+
+    try:
+        win.record_selected_guide_item(prog_dateline)
+
+        queue = isolated_queue_mgr.list_queue()
+        # Existing 30m show cannot be delayed, so it must be removed. Only Dateline should remain!
+        assert len(queue) == 1
+        assert "Dateline" in queue[0]["title"]
+        assert queue[0]["channel"] == "NBC"
+        assert queue[0]["start_iso"] == t_start.strftime("%Y-%m-%dT%H:%M:%S")
+        assert queue[0]["duration_iso"] == "01:00:00"
+    finally:
+        kaffeine_dvr.gui.RecordingConflictDialog = orig_dialog
+
+
+def test_record_selected_guide_item_same_time_keep_existing(qtbot, isolated_config: ConfigManager, isolated_queue_mgr: QueueManager):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.config_mgr = isolated_config
+    win.queue_mgr = isolated_queue_mgr
+    win.watcher.queue_mgr = isolated_queue_mgr
+
+    base_time = datetime.now() + timedelta(days=1)
+    t_start = base_time.replace(hour=20, minute=0, second=0, microsecond=0)
+
+    # Queue 30m show on ABC (Family Feud)
+    id_existing = isolated_queue_mgr.add_recording(
+        title="Family Feud",
+        channel="ABC",
+        start_iso=t_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        duration_iso="00:30:00",
+        buffer_mins=0
+    )
+
+    prog_dateline = {
+        "show_title": "Dateline",
+        "episode_title": "Mystery",
+        "kaffeine_channel": "NBC",
+        "start_iso": t_start.strftime("%Y-%m-%dT%H:%M:%S"),
+        "duration_iso": "01:00:00",
+        "_category": "tvshows"
+    }
+
+    # Simulate user choosing option 2 (delay_upcoming: keep existing show in full, start new late)
+    def mock_conflict_dialog(*args, **kwargs):
+        dlg = MagicMock()
+        dlg.exec.return_value = QDialog.DialogCode.Accepted
+        dlg.get_resolution.return_value = "delay_upcoming"
+        return dlg
+
+    import kaffeine_dvr.gui
+    orig_dialog = kaffeine_dvr.gui.RecordingConflictDialog
+    kaffeine_dvr.gui.RecordingConflictDialog = mock_conflict_dialog
+
+    try:
+        win.record_selected_guide_item(prog_dateline)
+
+        queue = isolated_queue_mgr.list_queue()
+        assert len(queue) == 2
+        ff = [r for r in queue if "Family Feud" in r["title"]][0]
+        dl = [r for r in queue if "Dateline" in r["title"]][0]
+        assert ff["start_iso"] == t_start.strftime("%Y-%m-%dT%H:%M:%S")
+        assert "00:29" in ff["duration_iso"] or ff["duration_iso"] == "00:30:00"
+        # Dateline starts at 20:30 with 30m duration
+        expected_dl_start = (t_start + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
+        assert dl["start_iso"] == expected_dl_start
+        assert dl["duration_iso"] == "00:30:00"
+    finally:
+        kaffeine_dvr.gui.RecordingConflictDialog = orig_dialog
+
+
+def test_delay_recording_start_updates_end_iso(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+    t_start = "2026-10-17T10:00:00"
+    qid = qm.add_recording(
+        title="Show A",
+        channel="SUNS",
+        start_iso=t_start,
+        duration_iso="01:00:00",
+        buffer_mins=0
+    )
+
+    rec_before = qm.get_recording(qid)
+    assert rec_before["start_iso"] == "2026-10-17T10:00:00"
+    assert rec_before["end_iso"] == "2026-10-17T11:00:00"
+
+    success = qm.delay_recording_start(qid, "2026-10-17T10:30:00", "00:30:00")
+    assert success is True
+
+    rec_after = qm.get_recording(qid)
+    assert rec_after["start_iso"] == "2026-10-17T10:30:00"
+    assert rec_after["duration_iso"] == "00:30:00"
+    assert rec_after["end_iso"] == "2026-10-17T11:00:00"
+
+
+

@@ -576,56 +576,106 @@ class QueueManager:
             overlap_secs = int((overlap_end - overlap_start).total_seconds())
             overlap_mins = max(1, round(overlap_secs / 60))
 
-            if r_start < new_start and r_end <= new_end:
-                conflict_type = "preceding_overlaps_start"
+            if r_start < new_start:
                 earlier_rec = "existing"
                 target_cut = new_start - timedelta(seconds=5)
                 cut_secs = max(30, int((target_cut - r_start).total_seconds()))
                 cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
                 cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_secs = max(30, int((new_end - r_end).total_seconds()))
-                delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
-            elif new_start < r_start and new_end <= r_end:
-                conflict_type = "upcoming_overlaps_end"
-                earlier_rec = "requested"
-                target_cut = r_start - timedelta(seconds=5)
-                cut_secs = max(30, int((target_cut - new_start).total_seconds()))
-                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
-                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_secs = max(30, int((r_end - new_end).total_seconds()))
-                delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
-            elif r_start <= new_start and new_end <= r_end:
-                conflict_type = "encloses_new"
-                earlier_rec = "existing"
-                target_cut = new_start - timedelta(seconds=5)
-                cut_secs = max(30, int((target_cut - r_start).total_seconds()))
-                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
-                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_dur = "00:30:00"
-            else:
-                conflict_type = "encloses_existing"
-                earlier_rec = "requested"
-                target_cut = r_start - timedelta(seconds=5)
-                cut_secs = max(30, int((target_cut - new_start).total_seconds()))
-                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
-                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
-                delay_dur = "00:30:00"
 
-            conflicts.append({
-                "recording": rec,
-                "overlap_secs": overlap_secs,
-                "overlap_mins": overlap_mins,
-                "conflict_type": conflict_type,
-                "earlier_rec": earlier_rec,
-                "cut_early_end_iso": cut_end,
-                "cut_early_dur_iso": cut_dur,
-                "delay_start_iso": delay_start,
-                "delay_dur_iso": delay_dur,
-            })
+                can_delay = r_end < new_end
+                if can_delay:
+                    conflict_type = "preceding_overlaps_start"
+                    delay_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
+                    delay_secs = max(30, int((new_end - r_end).total_seconds()))
+                    delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
+                else:
+                    conflict_type = "encloses_new"
+                    delay_start = ""
+                    delay_dur = ""
+
+                conflicts.append({
+                    "recording": rec,
+                    "overlap_secs": overlap_secs,
+                    "overlap_mins": overlap_mins,
+                    "conflict_type": conflict_type,
+                    "earlier_rec": earlier_rec,
+                    "can_delay": can_delay,
+                    "cut_early_end_iso": cut_end,
+                    "cut_early_dur_iso": cut_dur,
+                    "delay_start_iso": delay_start,
+                    "delay_dur_iso": delay_dur,
+                })
+            elif new_start < r_start:
+                earlier_rec = "requested"
+                target_cut = r_start - timedelta(seconds=5)
+                cut_secs = max(30, int((target_cut - new_start).total_seconds()))
+                cut_dur = f"{cut_secs//3600:02d}:{(cut_secs%3600)//60:02d}:{cut_secs%60:02d}"
+                cut_end = target_cut.strftime("%Y-%m-%dT%H:%M:%S")
+
+                can_delay = new_end < r_end
+                if can_delay:
+                    conflict_type = "upcoming_overlaps_end"
+                    delay_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
+                    delay_secs = max(30, int((r_end - new_end).total_seconds()))
+                    delay_dur = f"{delay_secs//3600:02d}:{(delay_secs%3600)//60:02d}:{delay_secs%60:02d}"
+                else:
+                    conflict_type = "encloses_existing"
+                    delay_start = ""
+                    delay_dur = ""
+
+                conflicts.append({
+                    "recording": rec,
+                    "overlap_secs": overlap_secs,
+                    "overlap_mins": overlap_mins,
+                    "conflict_type": conflict_type,
+                    "earlier_rec": earlier_rec,
+                    "can_delay": can_delay,
+                    "cut_early_end_iso": cut_end,
+                    "cut_early_dur_iso": cut_dur,
+                    "delay_start_iso": delay_start,
+                    "delay_dur_iso": delay_dur,
+                })
+            else:
+                # r_start == new_start (both programs start at the exact same time)
+                earlier_rec = "same_time"
+                conflict_type = "exact_start_conflict"
+
+                can_delay_requested = r_end < new_end
+                if can_delay_requested:
+                    delay_requested_start = r_end.strftime("%Y-%m-%dT%H:%M:%S")
+                    delay_req_secs = max(30, int((new_end - r_end).total_seconds()))
+                    delay_req_dur = f"{delay_req_secs//3600:02d}:{(delay_req_secs%3600)//60:02d}:{delay_req_secs%60:02d}"
+                else:
+                    delay_requested_start = ""
+                    delay_req_dur = ""
+
+                can_delay_existing = new_end < r_end
+                if can_delay_existing:
+                    delay_existing_start = new_end.strftime("%Y-%m-%dT%H:%M:%S")
+                    delay_ex_secs = max(30, int((r_end - new_end).total_seconds()))
+                    delay_ex_dur = f"{delay_ex_secs//3600:02d}:{(delay_ex_secs%3600)//60:02d}:{delay_ex_secs%60:02d}"
+                else:
+                    delay_existing_start = ""
+                    delay_ex_dur = ""
+
+                conflicts.append({
+                    "recording": rec,
+                    "overlap_secs": overlap_secs,
+                    "overlap_mins": overlap_mins,
+                    "conflict_type": conflict_type,
+                    "earlier_rec": earlier_rec,
+                    "can_delay_requested": can_delay_requested,
+                    "delay_requested_start_iso": delay_requested_start,
+                    "delay_requested_dur_iso": delay_req_dur,
+                    "can_delay_existing": can_delay_existing,
+                    "delay_existing_start_iso": delay_existing_start,
+                    "delay_existing_dur_iso": delay_ex_dur,
+                    "cut_early_end_iso": "",
+                    "cut_early_dur_iso": "",
+                    "delay_start_iso": delay_requested_start if can_delay_requested else delay_existing_start,
+                    "delay_dur_iso": delay_req_dur if can_delay_requested else delay_ex_dur,
+                })
 
         return conflicts
 
@@ -711,13 +761,23 @@ class QueueManager:
             dt_start = datetime.fromisoformat(new_start_iso)
             start_display = dt_start.strftime("%Y-%m-%d %I:%M %p")
         except Exception:
+            dt_start = None
             start_display = new_start_iso
+
+        new_end_iso = rec.get("end_iso")
+        if dt_start:
+            try:
+                parts = [int(p) for p in new_dur_iso.split(":")]
+                secs = parts[0] * 3600 + parts[1] * 60 + (parts[2] if len(parts) > 2 else 0)
+                new_end_iso = (dt_start + timedelta(seconds=secs)).strftime("%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                pass
 
         cur.execute("""
             UPDATE recording_queue
-            SET start_iso = ?, duration_iso = ?, start_time_local = ?, buffer_mins = 0
+            SET start_iso = ?, duration_iso = ?, end_iso = ?, start_time_local = ?, buffer_mins = 0
             WHERE id = ?
-        """, (new_start_iso, new_dur_iso, start_display, queue_id))
+        """, (new_start_iso, new_dur_iso, new_end_iso, start_display, queue_id))
         conn.commit()
         conn.close()
 
@@ -737,6 +797,21 @@ class QueueManager:
             except Exception as e:
                 print(f"Error updating Kaffeine timer for '{rec.get('title')}': {e}")
 
+        if rec.get("kaffeine_key"):
+            try:
+                k_db = Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db"
+                if k_db.exists():
+                    k_conn = sqlite3.connect(str(k_db))
+                    k_cur = k_conn.cursor()
+                    k_cur.execute(
+                        "UPDATE RecordingSchedule SET Begin = ?, Duration = ? WHERE Id = ?",
+                        (new_start_iso, new_dur_iso, rec["kaffeine_key"])
+                    )
+                    k_conn.commit()
+                    k_conn.close()
+            except Exception as e:
+                print(f"Error syncing delayed schedule to Kaffeine sqlite: {e}")
+
         return True
 
     def get_history_map(self, limit: int = 200) -> Dict[Any, Dict[str, Any]]:
@@ -753,7 +828,19 @@ class QueueManager:
                 mapping[(ch, start)] = r
         return mapping
 
-    def remove_recording(self, queue_id: int) -> Optional[Dict[str, Any]]:
+    def get_recording(self, queue_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves a single recording from the queue by its ID.
+        """
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recording_queue WHERE id = ?", (queue_id,))
+        row = cur.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def remove_recording(self, queue_id: int, dbus_client: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """
         Removes/cancels a recording from queue. Returns the recording's details dictionary
         (including kaffeine_key, channel, title, start_iso) so Kaffeine timers can be purged.
@@ -770,6 +857,24 @@ class QueueManager:
         cur.execute("DELETE FROM recording_queue WHERE id = ?", (queue_id,))
         conn.commit()
         conn.close()
+
+        if rec_data.get("kaffeine_key"):
+            if dbus_client:
+                try:
+                    dbus_client.remove_recording(rec_data["kaffeine_key"])
+                except Exception as e:
+                    print(f"Error removing Kaffeine timer: {e}")
+            try:
+                k_db = Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db"
+                if k_db.exists():
+                    k_conn = sqlite3.connect(str(k_db))
+                    k_cur = k_conn.cursor()
+                    k_cur.execute("DELETE FROM RecordingSchedule WHERE Id = ?", (rec_data["kaffeine_key"],))
+                    k_conn.commit()
+                    k_conn.close()
+            except Exception as e:
+                print(f"Error purging Kaffeine sqlite schedule: {e}")
+
         return rec_data
 
     def get_due_to_arm(self) -> List[Dict[str, Any]]:

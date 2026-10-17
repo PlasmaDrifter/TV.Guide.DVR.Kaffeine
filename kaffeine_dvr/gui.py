@@ -9065,27 +9065,28 @@ class MainWindow(QMainWindow):
         layout.addWidget(desc_box)
 
         # 3-Column balanced category distribution to eliminate vertical scrolling:
-        # Col 1: Global & Navigation (6) + Cheatsheet & Help (1)
+        # Col 1: Guide Navigation Keys (4) + Guide Program Hotkeys (4)
         # Col 2: TV Guide Controls (9)
-        # Col 3: Guide Navigation Keys (4) + Guide Program Hotkeys (4)
+        # Col 3: Global & Navigation (6) + Cheatsheet & Help (1)
         col1_categories = [
             (
-                "Global && Navigation",
+                "Guide Navigation Keys",
                 "#38bdf8",
                 [
-                    ("tab_guide", "Switch to TV Guide tab"),
-                    ("tab_recordings", "Switch to Recordings Schedule tab"),
-                    ("tab_settings", "Switch to Settings tab"),
-                    ("tab_help", "Switch to Help and Information tab"),
-                    ("maximize_grid", "Toggle Maximize Guide Grid"),
-                    ("quit_app", "Quit Application"),
+                    ("nav_up", "Navigate Guide Up"),
+                    ("nav_down", "Navigate Down / Initialize"),
+                    ("nav_left", "Navigate Guide Left"),
+                    ("nav_right", "Navigate Guide Right"),
                 ],
             ),
             (
-                "Cheatsheet && Help",
-                "#a855f7",
+                "Guide Program Hotkeys",
+                "#f59e0b",
                 [
-                    ("show_shortcuts", "Open Shortcuts Dialog"),
+                    ("prog_details", "Show Program Details / Action Card"),
+                    ("prog_watch", "Watch Live / Tune Channel"),
+                    ("prog_record", "Record Selected Program"),
+                    ("prog_auto_record", "Auto-Record Series (Create Rule)"),
                 ],
             ),
         ]
@@ -9110,23 +9111,22 @@ class MainWindow(QMainWindow):
 
         col3_categories = [
             (
-                "Guide Navigation Keys",
+                "Global && Navigation",
                 "#38bdf8",
                 [
-                    ("nav_up", "Navigate Guide Up"),
-                    ("nav_down", "Navigate Down / Initialize"),
-                    ("nav_left", "Navigate Guide Left"),
-                    ("nav_right", "Navigate Guide Right"),
+                    ("tab_guide", "Switch to TV Guide tab"),
+                    ("tab_recordings", "Switch to Recordings Schedule tab"),
+                    ("tab_settings", "Switch to Settings tab"),
+                    ("tab_help", "Switch to Help and Information tab"),
+                    ("maximize_grid", "Toggle Maximize Guide Grid"),
+                    ("quit_app", "Quit Application"),
                 ],
             ),
             (
-                "Guide Program Hotkeys",
-                "#f59e0b",
+                "Cheatsheet && Help",
+                "#a855f7",
                 [
-                    ("prog_details", "Show Program Details / Action Card"),
-                    ("prog_watch", "Watch Live / Tune Channel"),
-                    ("prog_record", "Record Selected Program"),
-                    ("prog_auto_record", "Auto-Record Series (Create Rule)"),
+                    ("show_shortcuts", "Open Shortcuts Dialog"),
                 ],
             ),
         ]

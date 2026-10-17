@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from .config import ConfigManager
 from .dbus_client import KaffeineDbusClient
-from .guide_service import GuideService
+from .guide_service import GuideService, get_program_duration_mins
 from .queue_manager import QueueManager
 
 SPORTS_KEYWORDS = (
@@ -141,9 +141,10 @@ class RulesEngine:
 
                 # Determine post-roll recording buffer
                 rule_buf = rule.get("buffer_mins")
+                prog_dur = get_program_duration_mins(prog)
                 if rule_buf is not None and rule_buf >= 0:
                     applied_buffer = int(rule_buf)
-                elif self.config_mgr.auto_buffer_sports and is_sports:
+                elif self.config_mgr.auto_buffer_sports and is_sports and prog_dur > 91:
                     applied_buffer = int(self.config_mgr.sports_buffer_mins)
                 else:
                     applied_buffer = int(self.config_mgr.end_buffer_mins)

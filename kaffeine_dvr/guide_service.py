@@ -26,6 +26,25 @@ except (ImportError, ValueError):
     from kaffeine_dvr.config import ConfigManager
 
 
+def get_program_duration_mins(prog: Optional[Dict[str, Any]]) -> int:
+    """Extract scheduled program duration in minutes from guide metadata."""
+    if not prog or not isinstance(prog, dict):
+        return 0
+    if prog.get("runtime_mins"):
+        try:
+            return int(prog["runtime_mins"])
+        except (ValueError, TypeError):
+            pass
+    dur_iso = prog.get("duration_iso", "")
+    if dur_iso:
+        try:
+            parts = [int(p) for p in str(dur_iso).split(":")]
+            return parts[0] * 60 + parts[1]
+        except (ValueError, IndexError):
+            pass
+    return 0
+
+
 def parse_xmltv_datetime(dt_str: str) -> Optional[datetime]:
     if not dt_str:
         return None

@@ -115,7 +115,7 @@ try:
         ConfigManager,
     )
     from .dbus_client import KaffeineDbusClient
-    from .guide_service import GuideService
+    from .guide_service import GuideService, get_program_duration_mins
     from .queue_manager import QueueManager
     from .rules_engine import RulesEngine
     from .signal_scanner import ChannelSignalScanWorker, DvbSignalReader
@@ -131,7 +131,7 @@ except (ImportError, ValueError):
         ConfigManager,
     )
     from kaffeine_dvr.dbus_client import KaffeineDbusClient
-    from kaffeine_dvr.guide_service import GuideService
+    from kaffeine_dvr.guide_service import GuideService, get_program_duration_mins
     from kaffeine_dvr.queue_manager import QueueManager
     from kaffeine_dvr.rules_engine import RulesEngine
     from kaffeine_dvr.signal_scanner import ChannelSignalScanWorker, DvbSignalReader
@@ -7601,7 +7601,8 @@ class MainWindow(QMainWindow):
         dvr_layout.addRow(
             make_setting_label(
                 "Sports Auto-Extend:",
-                "Applies extended post-roll padding to live sporting events, games, and matches to catch overtime."
+                "Applies extended post-roll padding to live sporting events, games, and matches over 91 minutes long to catch overtime.\n\n"
+                "Sports preshows, recaps, and general sports talk shows (91 minutes or less) use standard end buffering to avoid scheduling conflicts."
             ),
             sports_row
         )
@@ -15287,7 +15288,8 @@ class MainWindow(QMainWindow):
             return
 
         is_sports = (classify_guide_category(prog) == "sports")
-        if is_sports and self.config_mgr.auto_buffer_sports:
+        prog_dur = get_program_duration_mins(prog)
+        if is_sports and self.config_mgr.auto_buffer_sports and prog_dur > 91:
             buf_mins = self.config_mgr.sports_buffer_mins
         elif self.config_mgr.end_buffer_mins > 0:
             buf_mins = self.config_mgr.end_buffer_mins

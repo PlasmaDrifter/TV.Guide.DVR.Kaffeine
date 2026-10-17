@@ -59,6 +59,7 @@ class Watcher:
         self.storage_mgr = storage_mgr or StorageManager(config_mgr=self.config_mgr, queue_mgr=self.queue_mgr)
         self.running = True
         self.last_sync_time = 0.0
+        self._recovery_attempted = set()
 
     def reap_children(self):
         """Reap any terminated child processes to prevent zombie (<defunct>) processes."""
@@ -351,8 +352,154 @@ class Watcher:
                     except Exception:
                         pass
 
+    def recover_interrupted_recordings(self) -> int:
+        """
+        Detects active recordings (status == 'RECORDING' or 'ARMED') that were interrupted
+        by a system reboot, crash, or unexpected power loss while broadcast is still in progress.
+        If at least 5 minutes (300 seconds) remain in the broadcast (or before the tuner is
+        required by a consecutive recording on another channel), immediately re-arms Kaffeine
+        via D-Bus to record the remaining segment.
+        """
+        active_recordings = self.queue_mgr.list_queue(include_completed=False)
+        interrupted = [
+            r for r in active_recordings
+            if r.get("status") in ("RECORDING", "ARMED") and r.get("id") not in self._recovery_attempted
+        ]
+        if not interrupted:
+            return 0
+
+        now = datetime.now()
+        recovered_count = 0
+        cfg = self.config_mgr
+
+        # Check which streams are currently active in Kaffeine over D-Bus
+        running_stream_ids = set()
+        running_stream_channels = set()
+        if self.dbus_client.is_running():
+            try:
+                active_dbus = self.dbus_client._list_via_dbus()
+                for entry in active_dbus:
+                    if entry.get("is_running"):
+                        if entry.get("id") is not None:
+                            running_stream_ids.add(int(entry["id"]))
+                        e_ch = (entry.get("channel") or "").strip().lower()
+                        if e_ch:
+                            running_stream_channels.add(e_ch)
+            except Exception as e:
+                print(f"Notice: Failed to query D-Bus schedule during recovery check: {e}", flush=True)
+
+        for rec in interrupted:
+            qid = rec["id"]
+            title = rec.get("title", "")
+            channel = rec.get("channel", "")
+            ch_lower = (channel or "").strip().lower()
+            k_key = rec.get("kaffeine_key")
+
+            # If this stream is already actively recording in Kaffeine, no recovery needed
+            if k_key is not None and int(k_key) in running_stream_ids:
+                continue
+
+            try:
+                end_dt = datetime.fromisoformat(rec["end_iso"])
+            except Exception as e:
+                print(f"Error parsing timestamps for interrupted recording #{qid}: {e}", flush=True)
+                continue
+
+            # If show has already ended, skip recovery (update_statuses will archive it)
+            if now >= end_dt:
+                continue
+
+            # Calculate remaining time, considering single tuner conflicts with upcoming shows on other channels
+            target_end_dt = end_dt
+            for other in active_recordings:
+                if other.get("id") == qid:
+                    continue
+                o_ch = (other.get("channel") or "").strip().lower()
+                if o_ch != ch_lower and other.get("status") in ("QUEUED", "ARMED"):
+                    try:
+                        o_start = datetime.fromisoformat(other["start_iso"])
+                        if now < o_start < target_end_dt:
+                            # Predecessor must yield tuner 5 seconds early
+                            target_end_dt = o_start - timedelta(seconds=5)
+                    except Exception:
+                        continue
+
+            remaining_secs = int((target_end_dt - now).total_seconds())
+
+            # 5-minute (300 seconds) minimum threshold:
+            # If less than 5 minutes remain in the broadcast or before tuner handover, bypass recovery
+            if remaining_secs < 300:
+                continue
+
+            # Mark recovery attempted so we do not loop-rearm if tuning fails
+            self._recovery_attempted.add(qid)
+
+            rem_h = remaining_secs // 3600
+            rem_m = (remaining_secs % 3600) // 60
+            rem_s = remaining_secs % 60
+            rem_dur_iso = f"{rem_h:02d}:{rem_m:02d}:{rem_s:02d}"
+            resume_start_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            print(
+                f"[{now_str}] Mid-Broadcast Recovery: Interrupted recording detected for '{title}' on {channel} "
+                f"(ended at {rec['end_iso']}, remaining: {rem_dur_iso}). Re-arming Kaffeine...",
+                flush=True
+            )
+
+            try:
+                # Ensure Kaffeine is running (launches if closed)
+                if not self.dbus_client.is_running():
+                    self.dbus_client.launch_kaffeine(mode=cfg.launch_mode)
+                    for _ in range(20):
+                        if self.dbus_client.is_running():
+                            break
+                        time.sleep(0.25)
+                elif cfg.launch_mode in ("taskbar", "tray") or getattr(cfg, "launch_minimized", False):
+                    self.dbus_client.minimize_kaffeine(mode=cfg.launch_mode)
+
+                # Clean up stale pre-reboot timer key if present
+                if k_key:
+                    try:
+                        self.dbus_client.remove_recording(k_key)
+                    except Exception:
+                        pass
+
+                kaff_channel = cfg.resolve_channel(channel)
+                new_key = self.dbus_client.schedule_recording(title, kaff_channel, resume_start_iso, rem_dur_iso, 0)
+                if new_key and new_key > 0:
+                    self.queue_mgr.update_recovered_recording(qid, new_key)
+                    if cfg.launch_mode in ("taskbar", "tray") or getattr(cfg, "launch_minimized", False):
+                        self.dbus_client.minimize_kaffeine(mode=cfg.launch_mode)
+                    recovered_count += 1
+                    print(
+                        f"[{now_str}] Mid-Broadcast Recovery: Successfully resumed recording for '{title}' "
+                        f"(New D-Bus Key: {new_key}, duration: {rem_dur_iso}).",
+                        flush=True
+                    )
+
+                    if cfg.enable_desktop_notifications:
+                        try:
+                            send_desktop_notification(
+                                title=f"Recording Resumed: {title}",
+                                channel=channel,
+                                start_display=f"Broadcast in progress. Recording remaining {rem_m}m {rem_s}s.",
+                                lead_mins=0,
+                                persistent=getattr(cfg, "persistent_desktop_notifications", False)
+                            )
+                        except Exception as ne:
+                            print(f"Error sending recovery notification: {ne}", flush=True)
+                else:
+                    print(f"[{now_str}] Mid-Broadcast Recovery: schedule_recording returned invalid key {new_key} for '{title}'.", flush=True)
+            except Exception as e:
+                print(f"[{now_str}] Error recovering interrupted recording '{title}': {e}", flush=True)
+
+        return recovered_count
+
     def check_and_dispatch(self, notify: bool = True) -> int:
         self.reap_children()
+        # Recover any active recordings interrupted mid-broadcast by a reboot or crash
+        self.recover_interrupted_recordings()
         # Resolve any back-to-back buffer conflicts across different channels before arming
         self.queue_mgr.resolve_consecutive_buffer_conflicts(dbus_client=self.dbus_client)
         # Release tuner if any active recording has reached base end time and is lingering in buffer

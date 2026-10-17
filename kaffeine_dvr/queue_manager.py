@@ -909,6 +909,22 @@ class QueueManager:
         conn.commit()
         conn.close()
 
+    def update_recovered_recording(self, queue_id: int, new_key: int):
+        """
+        Updates an interrupted recording that was recovered mid-broadcast with its new D-Bus timer key
+        and resets created_at to give the new segment a full zero-byte watchdog grace period.
+        """
+        now_iso = datetime.now().isoformat()
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE recording_queue
+            SET status = 'RECORDING', kaffeine_key = ?, created_at = ?
+            WHERE id = ?
+        """, (new_key, now_iso, queue_id))
+        conn.commit()
+        conn.close()
+
     def get_due_for_notification(self, lead_time_mins: int = 0) -> List[Dict[str, Any]]:
         """
         Returns active recordings ('QUEUED', 'ARMED', 'RECORDING') where notified == 0,

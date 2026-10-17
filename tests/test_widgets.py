@@ -1263,6 +1263,27 @@ def test_channel_order_remove_channel_and_sync(qtbot, isolated_config, monkeypat
     assert win.channel_order_list.item(0).data(Qt.ItemDataRole.UserRole) == "NBC"
 
 
+def test_shortcuts_tab_layout_and_no_scrollbar(qtbot, isolated_config):
+    """Verify that the Keyboard Shortcuts settings tab lays out cleanly without vertical scrollbar overflow."""
+    from kaffeine_dvr.gui import MainWindow
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+    win.show()
+    win.resize(1920, 1080)
+    win.tabs.setCurrentIndex(2)  # Settings
+    win.settings_subtabs.setCurrentIndex(4)  # Keyboard Shortcuts
+    qtbot.waitExposed(win)
+
+    tab = win.settings_subtabs.currentWidget()
+    assert hasattr(tab, "verticalScrollBar")
+    # All 24 shortcut edits exist
+    assert len(win._shortcut_edits) == 24
+    # On 1080p desktop resolution, content fits completely without overflow
+    assert tab.verticalScrollBar().maximum() == 0
+    assert tab.widget().sizeHint().height() <= tab.viewport().height()
+    assert tab.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+
+
 
 
 

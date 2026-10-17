@@ -9019,16 +9019,18 @@ class MainWindow(QMainWindow):
     def create_settings_shortcuts_tab(self) -> QWidget:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
 
         # Header description box
         desc_box = QGroupBox("Keyboard Shortcuts Configuration")
         desc_box.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         desc_layout = QVBoxLayout(desc_box)
-        desc_layout.setContentsMargins(15, 12, 15, 12)
+        desc_layout.setContentsMargins(14, 8, 14, 8)
         desc_layout.setSpacing(6)
 
         hdr_lbl = QLabel(
@@ -9042,7 +9044,7 @@ class MainWindow(QMainWindow):
         desc_layout.addWidget(hdr_lbl)
 
         btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 4, 0, 0)
+        btn_row.setContentsMargins(0, 2, 0, 0)
         btn_row.setSpacing(10)
 
         reset_defaults_btn = QPushButton("Reset All Shortcuts to Defaults")
@@ -9062,10 +9064,11 @@ class MainWindow(QMainWindow):
         desc_layout.addLayout(btn_row)
         layout.addWidget(desc_box)
 
-        # Grouped shortcuts categories
-        # Left Column: Global & Navigation, TV Guide Controls
-        # Right Column: Guide Navigation Keys, Guide Program Hotkeys, Cheatsheet & Help
-        left_categories = [
+        # 3-Column balanced category distribution to eliminate vertical scrolling:
+        # Col 1: Global & Navigation (6) + Cheatsheet & Help (1)
+        # Col 2: TV Guide Controls (9)
+        # Col 3: Guide Navigation Keys (4) + Guide Program Hotkeys (4)
+        col1_categories = [
             (
                 "Global && Navigation",
                 "#38bdf8",
@@ -9079,11 +9082,21 @@ class MainWindow(QMainWindow):
                 ],
             ),
             (
+                "Cheatsheet && Help",
+                "#a855f7",
+                [
+                    ("show_shortcuts", "Open Shortcuts Dialog"),
+                ],
+            ),
+        ]
+
+        col2_categories = [
+            (
                 "TV Guide Controls",
                 "#4ade80",
                 [
                     ("focus_search", "Focus Guide Search Input"),
-                    ("sync_refresh", "Sync Guide Feeds / Refresh Recordings"),
+                    ("sync_refresh", "Sync Guide Feeds / Refresh"),
                     ("jump_now", "Jump Guide to Current Time (Now)"),
                     ("jump_primetime", "Jump Guide to Prime Time (7 PM)"),
                     ("view_grid", "Switch to Grid View Mode"),
@@ -9095,13 +9108,13 @@ class MainWindow(QMainWindow):
             ),
         ]
 
-        right_categories = [
+        col3_categories = [
             (
                 "Guide Navigation Keys",
                 "#38bdf8",
                 [
                     ("nav_up", "Navigate Guide Up"),
-                    ("nav_down", "Navigate Guide Down / Initialize Access"),
+                    ("nav_down", "Navigate Down / Initialize"),
                     ("nav_left", "Navigate Guide Left"),
                     ("nav_right", "Navigate Guide Right"),
                 ],
@@ -9110,17 +9123,10 @@ class MainWindow(QMainWindow):
                 "Guide Program Hotkeys",
                 "#f59e0b",
                 [
-                    ("prog_details", "Show Program Details / Open Action Card"),
-                    ("prog_watch", "Watch Live / Tune Selected Channel"),
+                    ("prog_details", "Show Program Details / Action Card"),
+                    ("prog_watch", "Watch Live / Tune Channel"),
                     ("prog_record", "Record Selected Program"),
                     ("prog_auto_record", "Auto-Record Series (Create Rule)"),
-                ],
-            ),
-            (
-                "Cheatsheet && Help",
-                "#a855f7",
-                [
-                    ("show_shortcuts", "Open Keyboard Shortcuts Dialog"),
                 ],
             ),
         ]
@@ -9129,43 +9135,35 @@ class MainWindow(QMainWindow):
 
         cols_row = QHBoxLayout()
         cols_row.setContentsMargins(0, 0, 0, 0)
-        cols_row.setSpacing(14)
-
-        left_col_lay = QVBoxLayout()
-        left_col_lay.setContentsMargins(0, 0, 0, 0)
-        left_col_lay.setSpacing(14)
-
-        right_col_lay = QVBoxLayout()
-        right_col_lay.setContentsMargins(0, 0, 0, 0)
-        right_col_lay.setSpacing(14)
+        cols_row.setSpacing(12)
 
         def _build_shortcut_group(cat_title: str, cat_color: str, items: list) -> QGroupBox:
             grp = QGroupBox(cat_title)
             grp.setStyleSheet(
                 f"QGroupBox {{ font-weight: bold; font-size: 13px; color: {cat_color}; "
-                f"border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; margin-top: 10px; padding: 12px 10px 10px 10px; }} "
+                f"border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; margin-top: 8px; padding: 10px 8px 8px 8px; }} "
                 f"QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 4px; }}"
             )
             g_lay = QGridLayout(grp)
-            g_lay.setContentsMargins(12, 10, 12, 10)
-            g_lay.setHorizontalSpacing(14)
-            g_lay.setVerticalSpacing(8)
+            g_lay.setContentsMargins(10, 8, 10, 8)
+            g_lay.setHorizontalSpacing(10)
+            g_lay.setVerticalSpacing(6)
 
             for row_idx, (sc_id, desc) in enumerate(items):
                 d_lbl = QLabel(desc)
-                d_lbl.setStyleSheet("color: #e2e8f0; font-size: 13px; font-weight: normal;")
+                d_lbl.setStyleSheet("color: #e2e8f0; font-size: 12px; font-weight: normal;")
 
                 edit_row = QHBoxLayout()
                 edit_row.setContentsMargins(0, 0, 0, 0)
-                edit_row.setSpacing(6)
+                edit_row.setSpacing(4)
 
                 cur_val = self.config_mgr.get_shortcut(sc_id)
                 kse = QKeySequenceEdit(QKeySequence(cur_val))
-                kse.setFixedWidth(140)
+                kse.setFixedWidth(115)
                 kse.setStyleSheet(
                     "QKeySequenceEdit { background-color: #1e293b; color: #38bdf8; "
-                    "border: 1px solid #334155; border-radius: 4px; padding: 3px 6px; "
-                    "font-family: monospace; font-size: 12px; font-weight: bold; }"
+                    "border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; "
+                    "font-family: monospace; font-size: 11px; font-weight: bold; }"
                 )
                 kse.keySequenceChanged.connect(lambda seq, sid=sc_id: self._on_shortcut_key_changed(sid, seq))
                 self._shortcut_edits[sc_id] = kse
@@ -9174,7 +9172,7 @@ class MainWindow(QMainWindow):
                 clr_btn = QPushButton("Clear")
                 clr_btn.setToolTip("Disable this shortcut")
                 clr_btn.setStyleSheet(
-                    "QPushButton { padding: 3px 8px; font-size: 11px; min-width: 50px; } "
+                    "QPushButton { padding: 2px 6px; font-size: 11px; min-width: 44px; } "
                     "QPushButton:hover { background-color: #334155; }"
                 )
                 clr_btn.clicked.connect(lambda checked, ed=kse, sid=sc_id: self._clear_shortcut_key(sid, ed))
@@ -9184,7 +9182,7 @@ class MainWindow(QMainWindow):
                 def_val = DEFAULT_SHORTCUTS.get(sc_id, "")
                 def_btn.setToolTip(f"Reset to default: {def_val}")
                 def_btn.setStyleSheet(
-                    "QPushButton { padding: 3px 8px; font-size: 11px; min-width: 56px; } "
+                    "QPushButton { padding: 2px 6px; font-size: 11px; min-width: 50px; } "
                     "QPushButton:hover { background-color: #334155; }"
                 )
                 def_btn.clicked.connect(lambda checked, ed=kse, sid=sc_id, dv=def_val: self._reset_single_shortcut(sid, ed, dv))
@@ -9197,16 +9195,14 @@ class MainWindow(QMainWindow):
 
             return grp
 
-        for cat_title, cat_color, items in left_categories:
-            left_col_lay.addWidget(_build_shortcut_group(cat_title, cat_color, items))
-        left_col_lay.addStretch()
-
-        for cat_title, cat_color, items in right_categories:
-            right_col_lay.addWidget(_build_shortcut_group(cat_title, cat_color, items))
-        right_col_lay.addStretch()
-
-        cols_row.addLayout(left_col_lay, 1)
-        cols_row.addLayout(right_col_lay, 1)
+        for col_data in (col1_categories, col2_categories, col3_categories):
+            col_lay = QVBoxLayout()
+            col_lay.setContentsMargins(0, 0, 0, 0)
+            col_lay.setSpacing(10)
+            for cat_title, cat_color, items in col_data:
+                col_lay.addWidget(_build_shortcut_group(cat_title, cat_color, items))
+            col_lay.addStretch()
+            cols_row.addLayout(col_lay, 1)
 
         layout.addLayout(cols_row)
         layout.addStretch()

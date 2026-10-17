@@ -2174,13 +2174,33 @@ class RecordingConflictDialog(BaseFramelessDialog):
         requested_start_iso: str,
         requested_duration_iso: str,
         total_tuners: int = 1,
-        parent=None
+        parent=None,
+        config_mgr=None
     ):
         super().__init__(parent)
         self.conflict = conflict
         self.resolution = "cancel"
         self.setWindowTitle("Recording Schedule Conflict")
-        self.setMinimumWidth(530)
+        self.setMinimumWidth(620)
+
+        # Resolve theme tokens dynamically
+        cfg = config_mgr or getattr(self, "config_mgr", None)
+        if not cfg and parent and hasattr(parent, "config_mgr"):
+            cfg = parent.config_mgr
+        self.config_mgr = cfg
+
+        app_theme = getattr(cfg, "app_theme", "midnight") if cfg else "midnight"
+        tokens = APP_THEMES.get(app_theme, APP_THEMES.get("midnight", {}))
+
+        self._dialog_bg = tokens.get("bg_button", "#272d3d")
+        self._dialog_border = tokens.get("border_light", tokens.get("border_color", "#3d465c"))
+        bg_card = tokens.get("bg_panel", "#151822")
+        border_card = tokens.get("border_color", "#333a4c")
+        text_primary = tokens.get("text_primary", "#dce1e8")
+        text_secondary = tokens.get("text_secondary", "#8c9bb0")
+        accent = tokens.get("accent_primary", "#2d6cd4")
+        accent_hover = tokens.get("accent_hover", "#3b7ee8")
+        btn_hover = tokens.get("bg_button_hover", "#333a50")
 
         existing_rec = conflict["recording"]
         overlap_mins = conflict.get("overlap_mins", 1)
@@ -2202,31 +2222,31 @@ class RecordingConflictDialog(BaseFramelessDialog):
             req_time_str = requested_start_iso
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(14)
 
         # Header Title & Subtitle
         header_box = QVBoxLayout()
         header_box.setSpacing(4)
         title_lbl = QLabel("<b>Hardware Tuner Conflict Detected</b>")
-        title_lbl.setStyleSheet("font-size: 16px; color: #ffffff;")
+        title_lbl.setStyleSheet(f"font-size: 16px; color: {text_primary};")
         header_box.addWidget(title_lbl)
 
         tuner_txt = f"All available TV tuners ({total_tuners}) are scheduled." if total_tuners > 1 else "Your TV tuner is already scheduled for another channel."
         subtitle_lbl = QLabel(f"{tuner_txt} The requested program overlaps with an existing recording by <b>{overlap_mins} minute{'s' if overlap_mins != 1 else ''}</b>.")
         subtitle_lbl.setWordWrap(True)
-        subtitle_lbl.setStyleSheet("font-size: 13px; color: #94a3b8;")
+        subtitle_lbl.setStyleSheet(f"font-size: 13px; color: {text_secondary}; line-height: 1.4;")
         header_box.addWidget(subtitle_lbl)
         layout.addLayout(header_box)
 
         # Comparison Card Frame
         card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #1e2433;
-                border: 1px solid #334155;
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_card};
+                border: 1px solid {border_card};
                 border-radius: 8px;
-            }
+            }}
         """)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(14, 12, 14, 12)
@@ -2235,9 +2255,9 @@ class RecordingConflictDialog(BaseFramelessDialog):
         # Existing recording row
         ex_row = QHBoxLayout()
         ex_badge = QLabel(" Scheduled ")
-        ex_badge.setStyleSheet("background-color: #0284c7; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 4px;")
+        ex_badge.setStyleSheet("background-color: #0284c7; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 5px;")
         ex_text = QLabel(f"<b>{existing_rec.get('title')}</b> on <b>{existing_rec.get('channel')}</b> ({ex_time_str})")
-        ex_text.setStyleSheet("color: #e2e8f0; font-size: 12px;")
+        ex_text.setStyleSheet(f"color: {text_primary}; font-size: 12.5px;")
         ex_row.addWidget(ex_badge)
         ex_row.addWidget(ex_text, 1)
         card_layout.addLayout(ex_row)
@@ -2245,9 +2265,9 @@ class RecordingConflictDialog(BaseFramelessDialog):
         # Requested recording row
         req_row = QHBoxLayout()
         req_badge = QLabel(" Requested ")
-        req_badge.setStyleSheet("background-color: #f97316; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 4px;")
+        req_badge.setStyleSheet(f"background-color: {accent}; color: #ffffff; font-size: 11px; font-weight: bold; border-radius: 4px; padding: 2px 5px;")
         req_text = QLabel(f"<b>{requested_title}</b> on <b>{requested_channel}</b> ({req_time_str})")
-        req_text.setStyleSheet("color: #e2e8f0; font-size: 12px;")
+        req_text.setStyleSheet(f"color: {text_primary}; font-size: 12.5px;")
         req_row.addWidget(req_badge)
         req_row.addWidget(req_text, 1)
         card_layout.addLayout(req_row)
@@ -2256,8 +2276,33 @@ class RecordingConflictDialog(BaseFramelessDialog):
 
         # Options Header
         opt_hdr = QLabel("<b>Choose how to resolve this conflict:</b>")
-        opt_hdr.setStyleSheet("font-size: 13px; color: #ffffff; margin-top: 4px;")
+        opt_hdr.setStyleSheet(f"font-size: 13.5px; color: {text_primary}; margin-top: 4px;")
         layout.addWidget(opt_hdr)
+
+        # Radio options styling with prominent, high-contrast indicators
+        radio_ss = f"""
+            QRadioButton {{
+                font-size: 13px;
+                font-weight: bold;
+                color: {text_primary};
+                spacing: 10px;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 10px;
+                border: 2px solid {text_secondary};
+                background-color: {tokens.get('bg_input', 'rgba(0, 0, 0, 0.25)')};
+            }}
+            QRadioButton::indicator:hover {{
+                border: 2px solid {accent_hover};
+                background-color: rgba(255, 255, 255, 0.08);
+            }}
+            QRadioButton::indicator:checked {{
+                border: 2px solid {accent};
+                background-color: {accent};
+            }}
+        """
 
         # Radio options
         self.trim_radio = QRadioButton()
@@ -2276,30 +2321,48 @@ class RecordingConflictDialog(BaseFramelessDialog):
             delay_desc = f"Delays '{existing_rec.get('title')}' so '{requested_title}' can finish in full."
 
         self.trim_radio.setChecked(True)
-        self.trim_radio.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
-        self.delay_radio.setStyleSheet("font-size: 13px; font-weight: bold; color: #ffffff;")
-        self.cancel_radio.setStyleSheet("font-size: 13px; color: #cbd5e1;")
+        self.trim_radio.setStyleSheet(radio_ss)
+        self.delay_radio.setStyleSheet(radio_ss)
+        self.cancel_radio.setStyleSheet(radio_ss)
 
-        radio_box = QVBoxLayout()
-        radio_box.setSpacing(6)
+        self.trim_radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.delay_radio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_radio.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        radio_box.addWidget(self.trim_radio)
-        lbl_trim_sub = QLabel(f"    {trim_desc}")
-        lbl_trim_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        options_box = QVBoxLayout()
+        options_box.setSpacing(10)
+
+        # Option 1 layout
+        opt1_layout = QVBoxLayout()
+        opt1_layout.setSpacing(3)
+        opt1_layout.addWidget(self.trim_radio)
+        lbl_trim_sub = QLabel(trim_desc)
         lbl_trim_sub.setWordWrap(True)
-        radio_box.addWidget(lbl_trim_sub)
+        lbl_trim_sub.setStyleSheet(f"font-size: 12px; color: {text_secondary}; margin-left: 28px;")
+        lbl_trim_sub.setCursor(Qt.CursorShape.PointingHandCursor)
+        lbl_trim_sub.mousePressEvent = lambda e: (self.trim_radio.setChecked(True), None)
+        opt1_layout.addWidget(lbl_trim_sub)
+        options_box.addLayout(opt1_layout)
 
-        radio_box.addSpacing(4)
-        radio_box.addWidget(self.delay_radio)
-        lbl_delay_sub = QLabel(f"    {delay_desc}")
-        lbl_delay_sub.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        # Option 2 layout
+        opt2_layout = QVBoxLayout()
+        opt2_layout.setSpacing(3)
+        opt2_layout.addWidget(self.delay_radio)
+        lbl_delay_sub = QLabel(delay_desc)
         lbl_delay_sub.setWordWrap(True)
-        radio_box.addWidget(lbl_delay_sub)
+        lbl_delay_sub.setStyleSheet(f"font-size: 12px; color: {text_secondary}; margin-left: 28px;")
+        lbl_delay_sub.setCursor(Qt.CursorShape.PointingHandCursor)
+        lbl_delay_sub.mousePressEvent = lambda e: (self.delay_radio.setChecked(True), None)
+        opt2_layout.addWidget(lbl_delay_sub)
+        options_box.addLayout(opt2_layout)
 
-        radio_box.addSpacing(4)
-        radio_box.addWidget(self.cancel_radio)
+        # Option 3 layout
+        opt3_layout = QVBoxLayout()
+        opt3_layout.setSpacing(3)
+        opt3_layout.addWidget(self.cancel_radio)
+        options_box.addLayout(opt3_layout)
 
-        layout.addLayout(radio_box)
+        layout.addLayout(options_box)
 
         # Buttons
         btns = QHBoxLayout()
@@ -2307,17 +2370,56 @@ class RecordingConflictDialog(BaseFramelessDialog):
         btns.addStretch()
 
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {btn_hover};
+                color: {text_primary};
+                border: 1px solid {border_card};
+                border-radius: 6px;
+                padding: 7px 16px;
+                font-size: 13px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {bg_card};
+                border-color: {text_secondary};
+            }}
+        """)
         self.cancel_btn.clicked.connect(self.reject)
 
         self.confirm_btn = QPushButton("Confirm Resolution")
         self.confirm_btn.setObjectName("primaryActionBtn")
-        self.confirm_btn.setStyleSheet("padding: 6px 16px; font-size: 13px; font-weight: bold;")
+        self.confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.confirm_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {accent};
+                color: #ffffff;
+                border: 1px solid {accent};
+                border-radius: 6px;
+                padding: 7px 18px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {accent_hover};
+                border-color: {accent_hover};
+            }}
+        """)
         self.confirm_btn.clicked.connect(self._on_confirm)
 
         btns.addWidget(self.cancel_btn)
         btns.addWidget(self.confirm_btn)
         layout.addLayout(btns)
+
+        self.adjustSize()
+
+    def get_dialog_colors(self):
+        bg = getattr(self, "_dialog_bg", None)
+        border = getattr(self, "_dialog_border", None)
+        if bg and border:
+            return bg, border
+        return super().get_dialog_colors()
 
     def _on_confirm(self):
         if self.trim_radio.isChecked():

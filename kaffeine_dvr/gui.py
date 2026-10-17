@@ -6816,6 +6816,27 @@ class MainWindow(QMainWindow):
         self.passport_notice.setOpenExternalLinks(True)
         self.passport_notice.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         left_col_layout.addWidget(self.passport_notice)
+
+        self.clear_passport_notice_btn = QPushButton("Clear / Dismiss Regional Warnings")
+        self.clear_passport_notice_btn.setToolTip("Dismiss the 'Action Needed' warnings for unconfigured regional channels that you do not wish to track")
+        self.clear_passport_notice_btn.setStyleSheet(
+            "QPushButton {"
+            "  background-color: #374151;"
+            "  border: 1px solid #4b5563;"
+            "  color: #d1d5db;"
+            "  padding: 4px 10px;"
+            "  border-radius: 4px;"
+            "  font-size: 11px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #4b5563;"
+            "  color: #ffffff;"
+            "}"
+        )
+        self.clear_passport_notice_btn.clicked.connect(self.dismiss_unconfigured_regional_channels)
+        self.clear_passport_notice_btn.setVisible(False)
+        left_col_layout.addWidget(self.clear_passport_notice_btn)
+
         self.update_tvpassport_notice()
         left_col_layout.addStretch()
 
@@ -9821,11 +9842,26 @@ class MainWindow(QMainWindow):
                     f"<b>No manual sync required:</b> When you click <i>Save Station IDs</i> below, Kaffeine DVR will automatically save the station, verify connection health, and immediately sync guide listings in the background.</div>"
                 )
                 self.passport_notice.setVisible(True)
+            if hasattr(self, "clear_passport_notice_btn"):
+                self.clear_passport_notice_btn.setVisible(True)
         else:
             if hasattr(self, "passport_header_warning"):
                 self.passport_header_warning.setVisible(False)
             if hasattr(self, "passport_notice"):
                 self.passport_notice.setVisible(False)
+            if hasattr(self, "clear_passport_notice_btn"):
+                self.clear_passport_notice_btn.setVisible(False)
+
+    def dismiss_unconfigured_regional_channels(self):
+        """Dismiss the warning banner for unconfigured regional channels."""
+        unconfigured = self.config_mgr.get_unconfigured_regional_channels()
+        if not unconfigured:
+            return
+        cur_dismissed = set(self.config_mgr.dismissed_regional_channels)
+        cur_dismissed.update(unconfigured)
+        self.config_mgr.dismissed_regional_channels = sorted(list(cur_dismissed))
+        self.update_tvpassport_notice()
+        self.flash_save_indicator("Warnings Cleared")
 
     def save_tvpassport_settings(self):
         raw = self.passport_stations_text.toPlainText()

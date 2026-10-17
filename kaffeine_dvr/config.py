@@ -1123,11 +1123,28 @@ class ConfigManager:
             print(f"Error reading Kaffeine channels: {e}")
             return []
 
+    @property
+    def dismissed_regional_channels(self) -> List[str]:
+        """List of regional channel names whose 'Action Needed' warnings have been dismissed by the user."""
+        return self.data.get("dismissed_regional_channels", [])
+
+    @dismissed_regional_channels.setter
+    def dismissed_regional_channels(self, val: List[str]):
+        self.data["dismissed_regional_channels"] = list(val)
+        self.save()
+
     def get_unconfigured_regional_channels(self) -> List[str]:
-        """Detect any scanned channels that are not national commercial networks and lack TV Passport station IDs."""
+        """
+        Detect any scanned channels that are active in the guide lineup (channel_map),
+        are not national commercial networks, lack TV Passport station IDs, and have not been dismissed.
+        """
         national_keys = {"FOX", "CBS", "NBC", "ABC"}
         scanned = self.get_scanned_kaffeine_channels()
         configured_passport = {k.strip().upper() for k in self.tvpassport_stations.keys()}
+        dismissed = {d.strip().upper() for d in self.dismissed_regional_channels}
+
+        # Determine active channels currently in the user's lineup
+        active_lineup = {k.strip().upper() for k in self.channel_map.keys()} | {v.strip().upper() for v in self.channel_map.values()}
 
         # Build reverse lookup of channel aliases from channel_map
         # e.g., if "KPHO" is mapped to "CBS" or vice-versa
@@ -1145,8 +1162,16 @@ class ConfigManager:
                 continue
             name_upper = name.upper()
 
+            # If user has a configured channel lineup and this channel is not in it, ignore it
+            if active_lineup and name_upper not in active_lineup and not any(alias in active_lineup for alias in alias_map.get(name_upper, set())):
+                continue
+
             # Collect all names this channel is known by (scanned name + any mapped aliases)
             all_known_names = {name_upper} | alias_map.get(name_upper, set())
+
+            # Check if dismissed by user
+            if any(alias in dismissed for alias in all_known_names):
+                continue
 
             # Check if any known alias matches a national network
             is_national = any(

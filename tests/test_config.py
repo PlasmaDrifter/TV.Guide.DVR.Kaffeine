@@ -134,3 +134,41 @@ def test_custom_theme_presets_limit_and_overwrite(isolated_config: ConfigManager
     assert len(cfg.custom_theme_presets) == 3
 
 
+def test_unconfigured_regional_channels_respects_lineup_and_dismissal(isolated_config: ConfigManager, monkeypatch):
+    cfg = isolated_config
+    # Mock scanned channels from Kaffeine
+    scanned = [
+        {"name": "Fox", "number": 1},
+        {"name": "CBS", "number": 2},
+        {"name": "Local TV", "number": 3},
+        {"name": "Ignored Regional", "number": 4},
+        {"name": "Removed Channel", "number": 5},
+    ]
+    monkeypatch.setattr(cfg, "get_scanned_kaffeine_channels", lambda: scanned)
+
+    # Active lineup in channel_map
+    cfg.channel_map = {
+        "Fox": "Fox",
+        "CBS": "CBS",
+        "Local TV": "Local TV",
+        "Ignored Regional": "Ignored Regional",
+    }
+    # Removed Channel is NOT in channel_map
+
+    # Configure TV Passport only for Fox & CBS (national)
+    cfg.tvpassport_stations = {}
+
+    # "Removed Channel" is not in lineup, so it should not appear
+    unconfigured = cfg.get_unconfigured_regional_channels()
+    assert "Removed Channel" not in unconfigured
+    assert "Local TV" in unconfigured
+    assert "Ignored Regional" in unconfigured
+
+    # Dismiss "Ignored Regional"
+    cfg.dismissed_regional_channels = ["Ignored Regional"]
+    unconfigured_after = cfg.get_unconfigured_regional_channels()
+    assert "Ignored Regional" not in unconfigured_after
+    assert "Local TV" in unconfigured_after
+
+
+

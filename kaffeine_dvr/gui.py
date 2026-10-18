@@ -6217,7 +6217,8 @@ class MainWindow(QMainWindow):
             self.guide_service,
             self.storage_mgr,
             dbus_client=self.dbus_client,
-            watcher=self.watcher
+            watcher=self.watcher,
+            on_queue_changed=self._on_web_queue_changed
         )
         if self.config_mgr.web_server_enabled and not os.environ.get("PYTEST_CURRENT_TEST"):
             self.web_server.start()
@@ -6322,12 +6323,8 @@ class MainWindow(QMainWindow):
             self.clock_widget.setVisible(is_shown)
 
         now = datetime.now()
-        # Option 2: Check schedule updates when viewing the Recordings tab (every 2s)
-        # or at minute and half-minute boundaries (:00 and :30) when in background
-        is_on_rec_tab = hasattr(self, "tabs") and self.tabs.currentIndex() == 1
-        if is_on_rec_tab and now.second % 2 == 0:
-            self._check_schedule_status_updates()
-        elif now.second in (0, 30):
+        # Check schedule status transitions and external queue updates every 2s
+        if now.second % 2 == 0:
             self._check_schedule_status_updates()
 
         if not is_shown:
@@ -11420,6 +11417,27 @@ class MainWindow(QMainWindow):
             res = self.queue_mgr.update_statuses([], max_history=self.config_mgr.max_history_entries, dbus_client=self.dbus_client)
             transitions = bool(res.get("started") or res.get("archived") or res.get("purged") or force)
 
+            # Check if queue content or statuses changed (e.g. from web companion)
+            queue = self.queue_mgr.list_queue(include_completed=True)
+            today = date.today()
+            current_fp = (
+                today,
+                tuple(
+                    (
+                        r.get("id"),
+                        r.get("status"),
+                        r.get("title"),
+                        r.get("channel"),
+                        r.get("start_iso"),
+                        r.get("duration_iso"),
+                        r.get("buffer_mins"),
+                        r.get("protected"),
+                    )
+                    for r in queue
+                ),
+            )
+            queue_changed = (getattr(self, "_last_rec_fingerprint", None) != current_fp)
+
             from PyQt6 import sip
             is_on_recordings_tab = (hasattr(self, "tabs") and not sip.isdeleted(self.tabs) and self.tabs.currentIndex() == 1)
             subtabs = getattr(self, "recordings_subtabs", None)
@@ -11430,19 +11448,53 @@ class MainWindow(QMainWindow):
                 subtabs is not None and not sip.isdeleted(subtabs) and subtabs.currentIndex() == 1
             )
 
-            if transitions or is_active_schedule_visible:
-                self.refresh_recordings()
+            if transitions or queue_changed or is_active_schedule_visible:
+                self.refresh_recordings(force=True)
 
             if transitions or is_history_visible:
                 self.refresh_history()
 
-            if transitions:
+            if transitions or queue_changed:
                 if hasattr(self, "guide_grid_table") and not sip.isdeleted(self.guide_grid_table) and self.guide_grid_table.rowCount() > 0:
-                    self.guide_grid_table.viewport().update()
+                    self._update_guide_realtime()
                 if hasattr(self, "guide_table") and not sip.isdeleted(self.guide_table) and self.guide_table.rowCount() > 0:
                     self._update_guide_realtime()
         except Exception:
             pass
+
+    def _on_web_queue_changed(self):
+        """Thread-safe callback triggered from KaffeineWebServer when recordings are changed."""
+        try:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self._handle_external_schedule_change(force=True))
+        except Exception as e:
+            print(f"Error dispatching web queue change to GUI: {e}")
+
+    def _handle_external_schedule_change(self, force: bool = False):
+        """
+        Synchronizes all UI components when recording queue is modified externally (e.g. via Web UI).
+        Refreshes active schedule table, updates guide tiles (grid and list), and details panel.
+        """
+        try:
+            from PyQt6 import sip
+            if sip.isdeleted(self):
+                return
+
+            # Refresh recordings table
+            self.refresh_recordings(force=force)
+
+            # Update guide views in real-time
+            if hasattr(self, "guide_grid_table") and not sip.isdeleted(self.guide_grid_table) and self.guide_grid_table.rowCount() > 0:
+                self._update_guide_realtime()
+            if hasattr(self, "guide_table") and not sip.isdeleted(self.guide_table) and self.guide_table.rowCount() > 0:
+                self._update_guide_realtime()
+
+            # If details panel is showing a program, update its scheduled indicator
+            cur_prog = getattr(self, "selected_grid_program", None) or getattr(self, "selected_list_program", None)
+            if cur_prog:
+                self._display_program_details(cur_prog)
+        except Exception as e:
+            print(f"Error handling external schedule change: {e}")
 
     def is_viewing_today(self) -> bool:
         """Returns True if the current guide date selector is viewing today or all upcoming."""
@@ -11492,30 +11544,39 @@ class MainWindow(QMainWindow):
                         continue
                     ch_key = (p_copy.get("kaffeine_channel") or "").strip().lower()
                     iso_key = (p_copy.get("start_iso") or "")[:16]
-                    if ch_key and iso_key:
-                        p_copy["_scheduled_rec"] = self._find_scheduled_recording(p_copy, grid_active_scheduled)
-                        p_copy["_history_rec"] = grid_history_map.get((ch_key, iso_key))
-                    start_dt = p_copy.get("_parsed_start_dt")
-                    end_dt = p_copy.get("_parsed_end_dt")
-                    if start_dt is None:
-                        start_iso = p_copy.get("start_iso")
-                        if not start_iso:
-                            continue
-                        try:
-                            start_dt = datetime.fromisoformat(start_iso)
-                            dur_iso = p_copy.get("duration_iso") or "00:30:00"
-                            parts = [int(x) for x in dur_iso.split(":")]
-                            dur = timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2] if len(parts) > 2 else 0)
-                            end_dt = start_dt + dur
-                            p_copy["_parsed_start_dt"] = start_dt
-                            p_copy["_parsed_end_dt"] = end_dt
-                        except Exception:
-                            continue
-
-                    if not start_dt or not end_dt:
-                        continue
-
                     try:
+                        old_sched = p_copy.get("_scheduled_rec")
+                        old_hist = p_copy.get("_history_rec")
+                        if ch_key and iso_key:
+                            new_sched = self._find_scheduled_recording(p_copy, grid_active_scheduled)
+                            new_hist = grid_history_map.get((ch_key, iso_key))
+                            p_copy["_scheduled_rec"] = new_sched
+                            p_copy["_history_rec"] = new_hist
+                        else:
+                            new_sched = old_sched
+                            new_hist = old_hist
+
+                        start_dt = p_copy.get("_parsed_start_dt")
+                        end_dt = p_copy.get("_parsed_end_dt")
+                        if start_dt is None:
+                            start_iso = p_copy.get("start_iso")
+                            if start_iso:
+                                try:
+                                    start_dt = datetime.fromisoformat(start_iso)
+                                    dur_iso = p_copy.get("duration_iso") or "00:30:00"
+                                    parts = [int(x) for x in dur_iso.split(":")]
+                                    dur = timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2] if len(parts) > 2 else 0)
+                                    end_dt = start_dt + dur
+                                    p_copy["_parsed_start_dt"] = start_dt
+                                    p_copy["_parsed_end_dt"] = end_dt
+                                except Exception:
+                                    pass
+
+                        if not start_dt or not end_dt:
+                            if (new_sched != old_sched) or (new_hist != old_hist):
+                                item.setData(Qt.ItemDataRole.UserRole, p_copy)
+                            continue
+
                         if now >= end_dt:
                             new_timing = "past"
                         elif start_dt <= now < end_dt:
@@ -11524,7 +11585,8 @@ class MainWindow(QMainWindow):
                             new_timing = "upcoming"
 
                         old_timing = p_copy.get("_timing_state")
-                        if new_timing != old_timing:
+                        data_changed = (new_timing != old_timing) or (new_sched != old_sched) or (new_hist != old_hist)
+                        if data_changed:
                             p_copy["_timing_state"] = new_timing
                             item.setData(Qt.ItemDataRole.UserRole, p_copy)
                             # Theme-aware visual background styling based on timing state
@@ -11560,7 +11622,7 @@ class MainWindow(QMainWindow):
                 # REC column
                 ch = (p.get("kaffeine_channel") or "").strip().lower()
                 start_iso = (p.get("start_iso") or "")[:16]
-                rec_info = active_scheduled.get((ch, start_iso))
+                rec_info = self._find_scheduled_recording(p, active_scheduled)
                 hist_info = history_map.get((ch, start_iso))
                 rec_status = rec_info.get("status", "") if isinstance(rec_info, dict) else ""
                 is_recording = bool(rec_info) and (rec_status == "RECORDING" or (timing_state == "live" and rec_status in ("ARMED", "RECORDING")))

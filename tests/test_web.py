@@ -397,3 +397,37 @@ def test_web_timeshift_start_and_stop(web_test_env):
     assert len(mock_dbus.cancelled) >= 1
 
 
+def test_web_on_queue_changed_notification(web_test_env):
+    base_url = web_test_env["base_url"]
+    server = web_test_env["server"]
+
+    call_count = 0
+    def queue_callback():
+        nonlocal call_count
+        call_count += 1
+
+    server.on_queue_changed = queue_callback
+
+    # POST /api/schedule
+    payload = json.dumps({
+        "title": "Evening News",
+        "channel": "KARE-11",
+        "start_iso": "2026-10-18T18:00:00",
+        "duration_iso": "00:30:00"
+    }).encode("utf-8")
+    req = urllib.request.Request(f"{base_url}/api/schedule", data=payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        res = json.loads(resp.read().decode("utf-8"))
+        qid = res["id"]
+
+    assert call_count == 1
+
+    # DELETE /api/schedule/<id>
+    del_req = urllib.request.Request(f"{base_url}/api/schedule/{qid}", method="DELETE")
+    with urllib.request.urlopen(del_req) as resp:
+        assert resp.status == 200
+
+    assert call_count == 2
+
+

@@ -181,6 +181,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     start_iso=start_iso,
                     duration_iso=dur_iso
                 )
+                self.server_obj.notify_queue_changed()
                 self._send_json({"id": qid, "status": "scheduled"})
                 return
             except Exception as e:
@@ -276,6 +277,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                 time.sleep(2.0)
 
                 stream_url = f"/api/stream/active/{qid}"
+                self.server_obj.notify_queue_changed()
                 self._send_json({
                     "status": "ok",
                     "queue_id": qid,
@@ -320,6 +322,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                         except Exception:
                             pass
 
+                self.server_obj.notify_queue_changed()
                 self._send_json({"status": "stopped", "queue_id": qid})
                 return
             except Exception as e:
@@ -350,6 +353,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                         title=rec.get("title")
                     )
                 self.server_obj.active_timeshift_sessions.pop(qid, None)
+                self.server_obj.notify_queue_changed()
                 self._send_json({"status": "cancelled", "id": qid})
                 return
             except Exception as e:
@@ -763,7 +767,8 @@ class KaffeineWebServer:
         guide_svc: GuideService,
         storage_mgr: StorageManager,
         dbus_client: Optional[Any] = None,
-        watcher: Optional[Any] = None
+        watcher: Optional[Any] = None,
+        on_queue_changed: Optional[Any] = None
     ):
         self.config_mgr = config_mgr
         self.queue_mgr = queue_mgr
@@ -771,6 +776,7 @@ class KaffeineWebServer:
         self.storage_mgr = storage_mgr
         self.dbus_client = dbus_client
         self.watcher = watcher
+        self.on_queue_changed = on_queue_changed
 
         self.port = self.config_mgr.web_server_port
         self.bind_addr = self.config_mgr.web_server_bind
@@ -780,6 +786,14 @@ class KaffeineWebServer:
         self.lockouts: Dict[str, float] = {}        # ip -> lockout until timestamp
         self.active_timeshift_sessions: Dict[int, Dict[str, Any]] = {} # qid -> session info
         self._lock = threading.Lock()
+
+    def notify_queue_changed(self):
+        """Invoke external queue changed callback if configured."""
+        if callable(self.on_queue_changed):
+            try:
+                self.on_queue_changed()
+            except Exception as e:
+                print(f"Error in on_queue_changed callback: {e}")
 
     def check_rate_limit(self, client_ip: str) -> tuple[bool, int]:
         """

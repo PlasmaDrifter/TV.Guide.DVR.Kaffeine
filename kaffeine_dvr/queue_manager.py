@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+
 class ActiveScheduledMap(dict):
     """
     Mapping of (channel_lower, iso_prefix) -> recording_dict for active recordings.

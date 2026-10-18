@@ -447,7 +447,7 @@ def test_record_selected_guide_item_same_time_record_new(qtbot, isolated_config:
     t_start = base_time.replace(hour=20, minute=0, second=0, microsecond=0)
 
     # Queue 30m show on ABC (Family Feud)
-    id_existing = isolated_queue_mgr.add_recording(
+    isolated_queue_mgr.add_recording(
         title="Family Feud",
         channel="ABC",
         start_iso=t_start.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -500,7 +500,7 @@ def test_record_selected_guide_item_same_time_keep_existing(qtbot, isolated_conf
     t_start = base_time.replace(hour=20, minute=0, second=0, microsecond=0)
 
     # Queue 30m show on ABC (Family Feud)
-    id_existing = isolated_queue_mgr.add_recording(
+    isolated_queue_mgr.add_recording(
         title="Family Feud",
         channel="ABC",
         start_iso=t_start.strftime("%Y-%m-%dT%H:%M:%S"),

@@ -400,7 +400,7 @@ class KaffeineDbusClient:
                 kaffeine_wids = self._get_toplevel_kaffeine_wids(env)
                 for wid in kaffeine_wids:
                     subprocess.run([xdotool_bin, "windowmap", wid], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
-                    
+
                     needs_size = width is not None and height is not None
                     needs_pos = x is not None and y is not None
 
@@ -423,7 +423,7 @@ class KaffeineDbusClient:
                         # Unmaximize Kaffeine window via X11 _NET_WM_STATE_REMOVE so windowsize takes effect
                         try:
                             import ctypes
-                            from ctypes import c_int, c_long, c_ulong, c_void_p, Structure
+                            from ctypes import Structure, c_int, c_long, c_ulong, c_void_p
                             X11 = ctypes.cdll.LoadLibrary("libX11.so.6")
                             X11.XOpenDisplay.restype = c_void_p
                             X11.XDefaultRootWindow.restype = c_ulong

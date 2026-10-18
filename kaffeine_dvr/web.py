@@ -303,7 +303,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                 ts_session = self.server_obj.active_timeshift_sessions.pop(qid, None)
 
                 # Stop recording in Kaffeine and remove from queue
-                rec_data = self.server_obj.queue_mgr.remove_recording(qid, dbus_client=self.server_obj.dbus_client)
+                self.server_obj.queue_mgr.remove_recording(qid, dbus_client=self.server_obj.dbus_client)
                 if self.server_obj.dbus_client and rec:
                     self.server_obj.dbus_client.cancel_recording(
                         key=rec.get("kaffeine_key"),

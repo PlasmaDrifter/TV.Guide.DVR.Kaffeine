@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from kaffeine_dvr.config import ConfigManager
@@ -52,7 +52,6 @@ def test_recover_interrupted_recording_under_5_mins_bypassed(isolated_queue_mgr:
     # Only 4 minutes remaining (10:26:00 to 10:30:00)
     now = datetime(2026, 10, 17, 10, 26, 0)
     start_iso = "2026-10-17T10:00:00"
-    end_iso = "2026-10-17T10:30:00"
 
     qid = isolated_queue_mgr.add_recording(
         title="Ending Soon",

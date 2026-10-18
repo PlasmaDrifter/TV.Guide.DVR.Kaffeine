@@ -39,6 +39,7 @@ def test_is_sports_program():
 
 def test_sports_buffer_threshold_over_91_minutes(isolated_config, isolated_guide_svc, isolated_queue_mgr):
     from unittest.mock import MagicMock
+
     from kaffeine_dvr.guide_service import get_program_duration_mins
 
     # 1. get_program_duration_mins parsing

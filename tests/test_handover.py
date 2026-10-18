@@ -104,6 +104,7 @@ def test_archive_to_history(isolated_queue_mgr: QueueManager):
 
 def test_stop_playback_dbus_call(monkeypatch):
     from unittest.mock import MagicMock
+
     from kaffeine_dvr.dbus_client import KaffeineDbusClient
 
     client = KaffeineDbusClient()

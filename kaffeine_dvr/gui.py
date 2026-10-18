@@ -95,7 +95,6 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate,
     QStyleFactory,
     QStyleOptionComboBox,
-    QStyleOptionHeader,
     QStyleOptionViewItem,
     QStylePainter,
     QTableWidget,
@@ -2684,7 +2683,7 @@ class GlobalArrowNavigationFilter(QObject):
             mw = self.main_window
             if mw and hasattr(mw, "tabs") and mw.tabs.currentIndex() == 0:
                 focused = QApplication.focusWidget() or obj
-                from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox
+                from PyQt6.QtWidgets import QAbstractSpinBox, QComboBox, QLineEdit, QPlainTextEdit, QTextEdit
                 if not isinstance(focused, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox)):
                     cfg = getattr(mw, "config_mgr", None)
                     sc_up = cfg.get_shortcut("nav_up") if cfg else "Up"
@@ -4224,7 +4223,6 @@ class GridPanFilter(QObject):
                     self._last_drag_pos = cur_pos
 
                     h_bar = self.table.horizontalScrollBar()
-                    v_bar = self.table.verticalScrollBar()
 
                     if delta.x() != 0 and h_bar:
                         old_val = h_bar.value()
@@ -10579,7 +10577,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.web_status_lbl.setText(
-                f"<b>Status:</b> <span style='color: #94a3b8;'>Disabled</span> (check 'Enable Local / Tailscale Web Companion' above to turn on)"
+                "<b>Status:</b> <span style='color: #94a3b8;'>Disabled</span> (check 'Enable Local / Tailscale Web Companion' above to turn on)"
             )
         self.web_status_lbl.setStyleSheet("color: #e2e8f0; font-size: 12px; margin-top: 4px;")
 
@@ -10618,10 +10616,10 @@ class MainWindow(QMainWindow):
         if is_enabled:
             status_line = f"<b>Status:</b> <span style='color: #4ade80;'>Active (Port {port})</span> • <span style='color: {auth_color}; font-weight: bold;'>{auth_str}</span>"
         else:
-            status_line = f"<b>Status:</b> <span style='color: #94a3b8;'>Disabled</span> • <span style='color: #64748b;'>Password required to enable</span>"
+            status_line = "<b>Status:</b> <span style='color: #94a3b8;'>Disabled</span> • <span style='color: #64748b;'>Password required to enable</span>"
 
         lan_part = f"<a href='http://{lan_ip}:{port}' style='color: #38bdf8; text-decoration: underline;'>http://{lan_ip}:{port}/</a>" if lan_ip else f"<a href='http://{hostname}:{port}' style='color: #38bdf8; text-decoration: underline;'>http://{hostname}:{port}/</a>"
-        ts_part = f"<a href='http://{tailscale_ip}:{port}' style='color: #38bdf8; text-decoration: underline;'>http://{tailscale_ip}:{port}/</a>" if tailscale_ip else f"<a href='https://tailscale.com' style='color: #94a3b8; text-decoration: underline;'>Tailscale</a> (install to access away from home)"
+        ts_part = f"<a href='http://{tailscale_ip}:{port}' style='color: #38bdf8; text-decoration: underline;'>http://{tailscale_ip}:{port}/</a>" if tailscale_ip else "<a href='https://tailscale.com' style='color: #94a3b8; text-decoration: underline;'>Tailscale</a> (install to access away from home)"
 
         self.web_status_lbl.setText(
             f"{status_line}<br>"
@@ -13848,8 +13846,6 @@ class MainWindow(QMainWindow):
                 return False
 
             # Find the leftmost visible column based on horizontal scroll
-            h_bar = table.horizontalScrollBar()
-            cur_scroll_x = h_bar.value() if h_bar else 0
             hdr = table.horizontalHeader()
             target_col = 0
             if hdr:

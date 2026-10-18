@@ -1264,17 +1264,27 @@ def test_channel_order_remove_channel_and_sync(qtbot, isolated_config, monkeypat
 
 
 def test_shortcuts_tab_layout_and_no_scrollbar(qtbot, isolated_config):
-    """Verify that the Keyboard Shortcuts settings tab lays out cleanly without vertical scrollbar overflow."""
+    """Verify that the Keyboard Shortcuts tab is exclusively in Help & Information and lays out cleanly."""
     from kaffeine_dvr.gui import MainWindow
     win = MainWindow(config_mgr=isolated_config)
     qtbot.addWidget(win)
     win.show()
     win.resize(1920, 1080)
-    win.tabs.setCurrentIndex(2)  # Settings
-    win.settings_subtabs.setCurrentIndex(4)  # Keyboard Shortcuts
+
+    # 1. Verify Keyboard Shortcuts is NOT in Settings
+    settings_tab_titles = [win.settings_subtabs.tabText(i) for i in range(win.settings_subtabs.count())]
+    assert "Keyboard Shortcuts" not in settings_tab_titles
+
+    # 2. Verify Keyboard Shortcuts IS in Help and Information
+    help_tab_titles = [win.help_subtabs.tabText(i) for i in range(win.help_subtabs.count())]
+    assert "Keyboard Shortcuts" in help_tab_titles
+
+    win.tabs.setCurrentIndex(3)  # Help and Information
+    shortcuts_idx = help_tab_titles.index("Keyboard Shortcuts")
+    win.help_subtabs.setCurrentIndex(shortcuts_idx)
     qtbot.waitExposed(win)
 
-    tab = win.settings_subtabs.currentWidget()
+    tab = win.help_subtabs.currentWidget()
     assert hasattr(tab, "verticalScrollBar")
     # All 24 shortcut edits exist
     assert len(win._shortcut_edits) == 24

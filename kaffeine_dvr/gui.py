@@ -10624,15 +10624,19 @@ class MainWindow(QMainWindow):
 
         self.web_status_lbl.setText(
             f"{status_line}<br>"
-            f"<div style='margin-top: 4px; line-height: 135%;'>"
+            f"<table style='width: 100%; margin-top: 4px; border: none;'>"
+            f"<tr>"
+            f"<td style='vertical-align: top; line-height: 135%;'>"
             f"• <b>This Computer:</b> <a href='http://localhost:{port}' style='color: #38bdf8; text-decoration: underline;'>http://localhost:{port}/</a><br>"
             f"• <b>Local LAN:</b> {lan_part}<br>"
-            f"• <b>Tailscale:</b> {ts_part}<br>"
-            f"<div style='margin-top: 8px; color: #94a3b8; font-size: 11px; line-height: 140%;'>"
+            f"• <b>Tailscale:</b> {ts_part}"
+            f"</td>"
+            f"<td style='vertical-align: middle; text-align: right; padding-left: 15px; color: #94a3b8; font-size: 11px; line-height: 140%; white-space: nowrap;'>"
             f"tailscale quickstart guide<br>"
             f"<a href='https://tailscale.com/docs/how-to/quickstart' style='color: #38bdf8; text-decoration: underline;'>tailscale.com</a>"
-            f"</div>"
-            f"</div>"
+            f"</td>"
+            f"</tr>"
+            f"</table>"
         )
         self.web_status_lbl.setStyleSheet("color: #cbd5e1; font-size: 12px; margin-top: 2px;")
 

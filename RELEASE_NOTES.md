@@ -1,5 +1,13 @@
 # Release Notes
 
+## v0.9.0
+
+- **Expanded Custom Themes (Up to 6 Presets)**: Increased custom grid theme preset storage capacity from 3 to 6 saved presets with an intuitive 2-column compact layout.
+- **Centered Custom Anchor Pill**: Permanently centered the `Custom (save up to 6)` anchor pill across the custom grid section regardless of saved preset count.
+- **Full 4x2 Grid Theme Parity**: Completed the 8th slot in both Guide Grid Themes and Application Themes with cross-populated matching presets: added **Deep Charcoal** (`#6366f1` indigo accent, slate graphite dark background `#16181d`) to Guide Grid Themes and **Emerald Forest** (`#10b981` pine/emerald green accent, rich deep pine backgrounds `#111a14`) to Application Themes.
+- **Web Companion Remote & Tailscale Documentation**: Added dedicated Quickstart guidance for remote zero-config setup using Tailscale alongside live stream support documentation in the in-app Web Access panel.
+- **Codebase Optimization & Lint Hardening**: Removed dead variables, cleaned and organized import blocks, eliminated unreferenced symbols, and ensured 100% test suite pass rate (152/152 tests passed).
+
 ## v0.8.15
 
 - **Multi-Channel Recording Conflict Resolution**: Added scheduling conflict detection and interactive resolution dialog (`RecordingConflictDialog`) when scheduling recordings that overlap across different channels on tuner-constrained systems. Automatically calculates trimming options to stop the preceding show early or delay the upcoming show, or cancel the request.

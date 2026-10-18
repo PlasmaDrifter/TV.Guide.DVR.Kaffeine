@@ -91,6 +91,14 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.0": (
+        "## What's Changed in v0.9.0\n\n"
+        "• **Expanded Custom Themes (Up to 6 Presets)**: Increased custom grid theme preset storage capacity from 3 to 6 saved presets with an intuitive 2-column compact layout.\n"
+        "• **Centered Custom Anchor Pill**: Permanently centered the 'Custom (save up to 6)' anchor pill across the custom grid section regardless of saved preset count.\n"
+        "• **Full 4x2 Grid Theme Parity**: Completed the 8th slot in both Guide Grid Themes and Application Themes with cross-populated matching presets: added Deep Charcoal to Guide Grid Themes and Emerald Forest to Application Themes.\n"
+        "• **Web Companion Remote & Tailscale Documentation**: Added dedicated Quickstart guidance for remote zero-config setup using Tailscale alongside live stream support documentation in the in-app Web Access panel.\n"
+        "• **Codebase Optimization & Lint Hardening**: Removed dead variables, cleaned and organized import blocks, eliminated unreferenced symbols, and ensured 100% test suite pass rate."
+    ),
     "0.8.15": (
         "## What's Changed in v0.8.15\n\n"
         "• **Antenna Aiming Window Stability & Restoration**: Resolved issue where clicking 'Done Aiming' halted playback by unmapping the Kaffeine window. Playback now terminates via D-Bus while keeping Kaffeine open and visible. Swapping channels to aim unminimizes, maps, positions, and raises Kaffeine without audio-only hidden states.\n"

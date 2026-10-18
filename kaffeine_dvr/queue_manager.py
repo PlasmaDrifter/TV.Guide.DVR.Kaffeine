@@ -217,6 +217,7 @@ class QueueManager:
                     "kaffeine_key": r["kaffeine_key"],
                     "start_dt": start_dt,
                     "start_iso": r["start_iso"],
+                    "duration_iso": r["duration_iso"],
                     "base_secs": base_secs,
                     "base_end_dt": base_end_dt,
                     "buf_mins": buf_mins,

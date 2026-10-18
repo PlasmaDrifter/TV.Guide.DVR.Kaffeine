@@ -36,6 +36,10 @@ def test_consecutive_recordings_on_different_channels_clamping(isolated_queue_mg
     assert queue[id_a]["duration_iso"] == "00:59:55"
     assert queue[id_a]["end_iso"] == "2026-10-11T12:59:55"
 
+    # Subsequent resolution calls must be idempotent and return no modifications (preventing log loops)
+    second_pass = qm.resolve_consecutive_buffer_conflicts()
+    assert second_pass == []
+
 def test_consecutive_recordings_on_same_channel_not_clamped(isolated_queue_mgr: QueueManager):
     qm = isolated_queue_mgr
     now = datetime(2026, 10, 11, 12, 0, 0)

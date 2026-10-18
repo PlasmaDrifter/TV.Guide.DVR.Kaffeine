@@ -1318,6 +1318,14 @@ def test_service_logs_dialog_width_and_highlighter(qtbot):
     assert len(formats2) >= 2
     assert formats2[0].format.foreground().color().name() == "#60a5fa"
 
+    # 3. Test Scope combo and Clear View button
+    assert hasattr(dlg, "scope_combo")
+    assert dlg.scope_combo.currentText() == "Current Session"
+    assert hasattr(dlg, "clear_btn")
+    dlg.clear_btn.click()
+    assert dlg.log_view.toPlainText() == ""
+    assert "cleared" in dlg.line_count_lbl.text()
+
 
 
 

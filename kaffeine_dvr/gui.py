@@ -365,13 +365,16 @@ class UpdateApplyWorker(QThread):
 class ServiceLogsWorker(QThread):
     finished = pyqtSignal(str, bool)
 
-    def __init__(self, lines: int = 100):
+    def __init__(self, lines: int = 100, current_boot: bool = True):
         super().__init__()
         self.lines = lines
+        self.current_boot = current_boot
 
     def run(self):
         try:
             cmd = ["journalctl", "--user", "-u", "kaffeine-dvr-watcher.service", "-n", str(self.lines), "--no-pager"]
+            if self.current_boot:
+                cmd.append("-b")
             res = subprocess.run(cmd, capture_output=True, text=True, check=False)
             output = res.stdout.strip() or res.stderr.strip() or "No log entries found for kaffeine-dvr-watcher.service."
             self.finished.emit(output, True)
@@ -652,6 +655,13 @@ class ServiceLogsDialog(BaseFramelessDialog):
         ctrl_row = QHBoxLayout()
         ctrl_row.setSpacing(10)
 
+        ctrl_row.addWidget(QLabel("Scope:"))
+        self.scope_combo = ThemedComboBox()
+        self.scope_combo.addItems(["Current Session", "All History"])
+        self.scope_combo.setCurrentText("Current Session")
+        self.scope_combo.currentIndexChanged.connect(self.refresh_logs)
+        ctrl_row.addWidget(self.scope_combo)
+
         ctrl_row.addWidget(QLabel("Lines:"))
         self.lines_combo = ThemedComboBox()
         self.lines_combo.addItems(["50", "100", "250", "500", "1000"])
@@ -668,6 +678,11 @@ class ServiceLogsDialog(BaseFramelessDialog):
         self.refresh_btn = QPushButton("Refresh Logs")
         self.refresh_btn.clicked.connect(self.refresh_logs)
         ctrl_row.addWidget(self.refresh_btn)
+
+        self.clear_btn = QPushButton("Clear View")
+        self.clear_btn.setToolTip("Clear the logs viewer display")
+        self.clear_btn.clicked.connect(self._clear_logs)
+        ctrl_row.addWidget(self.clear_btn)
 
         self.copy_btn = QPushButton("Copy to Clipboard")
         self.copy_btn.clicked.connect(self._copy_to_clipboard)
@@ -725,10 +740,16 @@ class ServiceLogsDialog(BaseFramelessDialog):
         except (ValueError, TypeError):
             line_count = 100
 
-        self._worker = ServiceLogsWorker(lines=line_count)
+        curr_boot = getattr(self, "scope_combo", None) is None or (self.scope_combo.currentText() == "Current Session")
+        self._worker = ServiceLogsWorker(lines=line_count, current_boot=curr_boot)
         self._worker.finished.connect(self._on_logs_loaded)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
+
+    def _clear_logs(self):
+        self.raw_logs = ""
+        self.log_view.setPlainText("")
+        self.line_count_lbl.setText("0 lines (cleared)")
 
     def _on_logs_loaded(self, output: str, ok: bool):
         self.refresh_btn.setEnabled(True)

@@ -619,7 +619,7 @@ class ServiceLogsDialog(BaseFramelessDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Background Watcher Service Logs")
-        self.resize(1180, 680)
+        self.resize(1400, 820)
         self.raw_logs = ""
         self._worker = None
 

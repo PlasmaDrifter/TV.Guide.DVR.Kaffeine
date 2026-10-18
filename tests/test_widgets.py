@@ -1291,8 +1291,8 @@ def test_service_logs_dialog_width_and_highlighter(qtbot):
     qtbot.addWidget(dlg)
 
     # 1. Dialog width is widened for improved readability
-    assert dlg.width() >= 1180
-    assert dlg.height() >= 650
+    assert dlg.width() >= 1400
+    assert dlg.height() >= 800
     assert hasattr(dlg, "highlighter")
     assert isinstance(dlg.highlighter, ServiceLogsHighlighter)
 

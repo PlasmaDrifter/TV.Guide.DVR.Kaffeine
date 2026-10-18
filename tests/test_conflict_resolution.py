@@ -577,11 +577,17 @@ def test_delayed_recording_matches_guide_tile_and_displays_border(qtbot, isolate
     win.config_mgr = isolated_config
     win.queue_mgr = isolated_queue_mgr
 
+    # Use tomorrow's date dynamically to ensure dates are always in the future
+    target_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    start_maury = f"{target_day}T23:04:00"
+    start_seinfeld = f"{target_day}T23:30:00"
+    delayed_seinfeld = f"{target_day}T23:39"
+
     # 1. Existing show on Nosey (23:04 to 23:39)
     isolated_queue_mgr.add_recording(
         title="Maury",
         channel="Nosey",
-        start_iso="2026-10-17T23:04:00",
+        start_iso=start_maury,
         duration_iso="00:35:00",
         buffer_mins=0
     )
@@ -591,7 +597,7 @@ def test_delayed_recording_matches_guide_tile_and_displays_border(qtbot, isolate
         "channel": "ABC",
         "show_title": "Seinfeld",
         "episode_title": "The Shower Head",
-        "start_iso": "2026-10-17T23:30:00",
+        "start_iso": f"{start_seinfeld}",
         "duration_iso": "00:30:00",
         "start_time_local": "11:30 PM",
     }
@@ -613,19 +619,19 @@ def test_delayed_recording_matches_guide_tile_and_displays_border(qtbot, isolate
         # 2. Check active scheduled map directly
         active_map = isolated_queue_mgr.get_active_scheduled_map()
         # Nominal start time (23:30) MUST be present in active_map
-        assert ("abc", "2026-10-17T23:30") in active_map
+        assert ("abc", f"{target_day}T23:30") in active_map
         # Delayed start time (23:39) MUST also be present
-        assert ("abc", "2026-10-17T23:39") in active_map
+        assert ("abc", delayed_seinfeld) in active_map
 
         # 3. win._find_scheduled_recording must return the recording for Seinfeld
         rec_found = win._find_scheduled_recording(prog_seinfeld, active_map)
         assert rec_found is not None
         assert "Seinfeld" in rec_found["title"]
-        assert rec_found["original_start_iso"] == "2026-10-17T23:30:00"
+        assert rec_found["original_start_iso"] == start_seinfeld
 
         # 4. In grid guide, the program tile must have _scheduled_rec populated
         win.guide_grid_table.clearContents()
-        win._populate_grid_guide([prog_seinfeld], airdate="2026-10-17")
+        win._populate_grid_guide([prog_seinfeld], airdate=target_day)
 
         item = win.guide_grid_table.item(0, 47)  # 23:30 slot (col 47)
         if not item:

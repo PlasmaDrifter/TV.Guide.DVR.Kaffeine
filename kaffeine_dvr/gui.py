@@ -6323,8 +6323,12 @@ class MainWindow(QMainWindow):
             self.clock_widget.setVisible(is_shown)
 
         now = datetime.now()
-        # Check schedule status transitions and external queue updates every 2s
-        if now.second % 2 == 0:
+        # Check schedule status updates when viewing the Recordings tab (every 2s)
+        # or periodically at :00, :15, :30, :45 when on other tabs
+        is_on_rec_tab = hasattr(self, "tabs") and self.tabs.currentIndex() == 1
+        if is_on_rec_tab and now.second % 2 == 0:
+            self._check_schedule_status_updates()
+        elif now.second in (0, 15, 30, 45):
             self._check_schedule_status_updates()
 
         if not is_shown:

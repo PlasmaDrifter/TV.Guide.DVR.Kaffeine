@@ -8156,7 +8156,7 @@ class MainWindow(QMainWindow):
         auto_adv_layout.setSpacing(6)
 
         self.guide_auto_advance_spin = NumberStepper()
-        self.guide_auto_advance_spin.setRange(0, 59)
+        self.guide_auto_advance_spin.setRange(0, 60)
         self.guide_auto_advance_spin.setValue(getattr(self.config_mgr, "guide_auto_advance_minute", 50))
         self.guide_auto_advance_spin.setPrefix(":")
         self.guide_auto_advance_spin.setSuffix(" min")
@@ -8171,11 +8171,12 @@ class MainWindow(QMainWindow):
         self.guide_auto_advance_spin.setEnabled(self.guide_auto_advance_check.isChecked())
         auto_adv_layout.addWidget(self.guide_auto_advance_check)
 
-        auto_adv_badge = HelpBadge(
-            "Automatically advances the guide forward to the next hour when the clock reaches the configured minute past the hour (default :50 min).\n\n"
-            "Safeguards prevent scrolling while actively dragging or browsing past/future time slots, and auto-advance only runs when viewing today's guide."
+        self.auto_adv_badge = HelpBadge(
+            "Automatically scrolls the guide forward to the next hour when reaching the configured minute past the hour. Set to :60 min to advance right on the hour instead of early.\n\n"
+            "When disabled, the guide will not automatically scroll, but all program info and statuses still update in real-time. Use 'Now' (or Home) to jump to the current time.\n\n"
+            "Safeguards prevent scrolling while actively dragging or browsing, and auto-advance only runs when viewing today."
         )
-        auto_adv_layout.addWidget(auto_adv_badge)
+        auto_adv_layout.addWidget(self.auto_adv_badge)
         auto_adv_layout.addStretch()
 
         col3_grid.addWidget(auto_adv_widget, 2, 1, Qt.AlignmentFlag.AlignVCenter)
@@ -11518,7 +11519,8 @@ class MainWindow(QMainWindow):
         # 3. Auto-Advance at configured minute past the hour (default :50)
         auto_adv = getattr(self.config_mgr, "guide_auto_advance", True)
         adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 50)
-        if auto_adv and is_today and now.minute >= adv_min:
+        should_adv = (now.minute == 0) if adv_min == 60 else (now.minute >= adv_min)
+        if auto_adv and is_today and should_adv:
             last_adv = getattr(self, "_last_auto_advanced_hour", None)
             cur_key = (now.year, now.month, now.day, now.hour)
             if last_adv != cur_key:
@@ -12351,7 +12353,7 @@ class MainWindow(QMainWindow):
             # Align the left edge of the grid to the current hour (e.g. 10:00 AM at 10:15).
             # Advance to the next hour when reaching the configured minute past the hour (default :50).
             adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 50) if hasattr(self, "config_mgr") else 50
-            effective_hour = (now.hour + 1) if now.minute >= adv_min else now.hour
+            effective_hour = (now.hour + 1) if (adv_min < 60 and now.minute >= adv_min) else now.hour
             target_slot = min(47, effective_hour * 2)
             self._scroll_grid_to_slot(target_slot, center=False, animate=animate)
         else:

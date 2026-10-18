@@ -170,9 +170,9 @@ def test_auto_advance_minute_setting(qtbot, isolated_config):
     isolated_config.guide_auto_advance_minute = 45
     assert isolated_config.guide_auto_advance_minute == 45
 
-    # Bounds clamping (0..59)
+    # Bounds clamping (0..60)
     isolated_config.guide_auto_advance_minute = 75
-    assert isolated_config.guide_auto_advance_minute == 59
+    assert isolated_config.guide_auto_advance_minute == 60
     isolated_config.guide_auto_advance_minute = -10
     assert isolated_config.guide_auto_advance_minute == 0
 
@@ -182,10 +182,16 @@ def test_auto_advance_minute_setting(qtbot, isolated_config):
 
     assert hasattr(win, "guide_auto_advance_spin")
     assert win.guide_auto_advance_spin.value() == 50
+    assert win.guide_auto_advance_spin.maximum() == 60
+
+    # Verify HelpBadge tooltip content
+    assert hasattr(win, "auto_adv_badge")
+    assert "Set to :60 min to advance right on the hour instead of early" in win.auto_adv_badge._tooltip_text
+    assert "When disabled, the guide will not automatically scroll" in win.auto_adv_badge._tooltip_text
 
     # Stepper value change updates config
-    win.guide_auto_advance_spin.setValue(40)
-    assert isolated_config.guide_auto_advance_minute == 40
+    win.guide_auto_advance_spin.setValue(60)
+    assert isolated_config.guide_auto_advance_minute == 60
 
     # Disabling auto-advance check disables stepper
     win.guide_auto_advance_check.setChecked(False)

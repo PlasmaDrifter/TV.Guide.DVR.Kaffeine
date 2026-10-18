@@ -1428,7 +1428,7 @@ class ConfigManager:
 
     @guide_auto_advance_minute.setter
     def guide_auto_advance_minute(self, val: int):
-        self.data["guide_auto_advance_minute"] = max(0, min(59, int(val)))
+        self.data["guide_auto_advance_minute"] = max(0, min(60, int(val)))
         self.save()
 
     @property

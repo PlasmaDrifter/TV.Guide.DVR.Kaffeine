@@ -187,6 +187,145 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)}, status=500)
                 return
 
+        # Start live timeshift session: POST /api/timeshift/start
+        if path == "/api/timeshift/start":
+            try:
+                data = json.loads(body) if body else {}
+                title = data.get("title", "Live TV").strip()
+                ch = data.get("channel", "").strip()
+                start_iso = data.get("start_iso", "").strip()
+                dur_iso = data.get("duration_iso", "02:00:00").strip()
+
+                if not ch:
+                    self._send_json({"error": "Missing channel parameter"}, status=400)
+                    return
+
+                now_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
+                if not start_iso:
+                    start_iso = now_iso
+
+                # Check tuner availability
+                active_queue = self.server_obj.queue_mgr.list_queue(include_completed=False)
+                conflicting = []
+                for r in active_queue:
+                    if r.get("is_timeshift"):
+                        continue
+                    if r.get("status") in ("RECORDING", "ARMED", "DISPATCHED"):
+                        r_ch = (r.get("channel") or "").strip().lower()
+                        if r_ch != ch.lower():
+                            conflicting.append(r)
+
+                total_tuners = self.server_obj.config_mgr.get_effective_tuner_count()
+                if len(conflicting) >= total_tuners:
+                    c_names = ", ".join([f"'{c.get('title')}' ({c.get('channel')})" for c in conflicting])
+                    self._send_json({
+                        "error": f"All TV tuners ({total_tuners}) are currently in use recording on other channels: {c_names}. Stop conflicting recordings before starting timeshift.",
+                        "tuner_busy": True
+                    }, status=409)
+                    return
+
+                # Check if this show is already actively recording in queue
+                active_map = self.server_obj.queue_mgr.get_active_scheduled_map()
+                ch_key = ch.strip().lower()
+                iso_key = start_iso[:16]
+                rec_info = active_map.get((ch_key, iso_key))
+
+                if rec_info and rec_info.get("status") == "RECORDING":
+                    qid = rec_info.get("id")
+                    stream_url = f"/api/stream/active/{qid}"
+                    self._send_json({
+                        "status": "ok",
+                        "queue_id": qid,
+                        "stream_url": stream_url,
+                        "is_scheduled": True
+                    })
+                    return
+
+                # Add timeshift entry to queue
+                qid = self.server_obj.queue_mgr.add_recording(
+                    title=title,
+                    channel=ch,
+                    start_iso=start_iso,
+                    duration_iso=dur_iso,
+                    lead_time_mins=0,
+                    buffer_mins=0,
+                    is_timeshift=True
+                )
+
+                # Dispatch recording to Kaffeine
+                if self.server_obj.watcher:
+                    self.server_obj.watcher.check_and_dispatch(notify=False)
+                elif self.server_obj.dbus_client:
+                    self.server_obj.dbus_client.schedule_recording(
+                        channel=ch,
+                        name=title,
+                        start_iso=start_iso,
+                        duration_iso=dur_iso
+                    )
+
+                # Register in active timeshift sessions
+                self.server_obj.active_timeshift_sessions[qid] = {
+                    "queue_id": qid,
+                    "channel": ch,
+                    "title": title,
+                    "start_time": time.time(),
+                    "file_path": None
+                }
+
+                # Brief wait for initial buffer
+                time.sleep(2.0)
+
+                stream_url = f"/api/stream/active/{qid}"
+                self._send_json({
+                    "status": "ok",
+                    "queue_id": qid,
+                    "stream_url": stream_url,
+                    "is_scheduled": False
+                })
+                return
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+                return
+
+        # Stop live timeshift session: POST /api/timeshift/stop
+        if path == "/api/timeshift/stop":
+            try:
+                data = json.loads(body) if body else {}
+                qid = data.get("queue_id")
+                if not qid:
+                    self._send_json({"error": "Missing queue_id parameter"}, status=400)
+                    return
+
+                qid = int(qid)
+                rec = self.server_obj.queue_mgr.get_recording(qid)
+                ts_session = self.server_obj.active_timeshift_sessions.pop(qid, None)
+
+                # Stop recording in Kaffeine and remove from queue
+                rec_data = self.server_obj.queue_mgr.remove_recording(qid, dbus_client=self.server_obj.dbus_client)
+                if self.server_obj.dbus_client and rec:
+                    self.server_obj.dbus_client.cancel_recording(
+                        key=rec.get("kaffeine_key"),
+                        channel=rec.get("channel"),
+                        title=rec.get("title")
+                    )
+
+                # Clean up temporary timeshift file if configured
+                if getattr(self.server_obj.config_mgr, "delete_timeshift_on_exit", True):
+                    fpath = (rec.get("file_path") if rec else None) or (ts_session.get("file_path") if ts_session else None)
+                    if fpath:
+                        try:
+                            p = Path(fpath)
+                            if p.exists():
+                                p.unlink()
+                        except Exception:
+                            pass
+
+                self._send_json({"status": "stopped", "queue_id": qid})
+                return
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+                return
+
         self._send_json({"error": "Not Found"}, status=404)
 
     def do_DELETE(self):
@@ -197,11 +336,20 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        # Cancel schedule: DELETE /api/schedule/<id>
+        # Cancel schedule or active recording: DELETE /api/schedule/<id>
         if path.startswith("/api/schedule/"):
             try:
                 qid = int(path.split("/")[-1])
-                self.server_obj.queue_mgr.remove_recording(qid)
+                rec = self.server_obj.queue_mgr.get_recording(qid)
+                # Pass dbus_client to remove_recording so it cancels in Kaffeine via D-Bus immediately
+                self.server_obj.queue_mgr.remove_recording(qid, dbus_client=self.server_obj.dbus_client)
+                if self.server_obj.dbus_client and rec:
+                    self.server_obj.dbus_client.cancel_recording(
+                        key=rec.get("kaffeine_key"),
+                        channel=rec.get("channel"),
+                        title=rec.get("title")
+                    )
+                self.server_obj.active_timeshift_sessions.pop(qid, None)
                 self._send_json({"status": "cancelled", "id": qid})
                 return
             except Exception as e:
@@ -285,6 +433,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     is_sched = rec_info is not None
                     rec_status = rec_info.get("status", "") if rec_info else ""
                     is_recording = (rec_status == "RECORDING")
+                    queue_id = rec_info.get("id") if rec_info else None
                     dur_iso = p.get("duration_iso") or "00:30:00"
                     rt_mins = p.get("runtime_mins")
                     if not rt_mins:
@@ -295,6 +444,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                             rt_mins = 30
                     out.append({
                         "id": p.get("id"),
+                        "queue_id": queue_id,
                         "title": p.get("show_title") or p.get("title") or "Untitled",
                         "episode_title": p.get("episode_title") or "",
                         "channel": ch_name,
@@ -321,15 +471,19 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
                 active_out = []
                 for a in active:
+                    aid = a.get("id")
+                    st = a.get("status")
+                    stream_url = f"/api/stream/active/{aid}" if (st == "RECORDING" and aid) else ""
                     active_out.append({
-                        "id": a.get("id"),
+                        "id": aid,
                         "title": a.get("title"),
                         "channel": a.get("channel"),
                         "start_iso": a.get("start_iso"),
                         "duration_iso": a.get("duration_iso"),
-                        "status": a.get("status"),
-                        "file_available": False,
-                        "stream_url": ""
+                        "status": st,
+                        "is_timeshift": bool(a.get("is_timeshift")),
+                        "file_available": bool(stream_url),
+                        "stream_url": stream_url
                     })
 
                 hist_out = []
@@ -359,6 +513,60 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     })
 
                 self._send_json({"active": active_out, "history": hist_out})
+                return
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
+                return
+
+        # Stream active in-progress or timeshift recording: GET /api/stream/active/<qid>
+        if path.startswith("/api/stream/active/"):
+            try:
+                subpath = path[len("/api/stream/active/"):].strip("/")
+                qid_str = subpath.split("/")[0]
+                qid = int(qid_str)
+
+                rec = self.server_obj.queue_mgr.get_recording(qid)
+                if not rec:
+                    self._send_json({"error": "Active recording not found in queue"}, status=404)
+                    return
+
+                title = rec.get("title", "")
+                fpath_str = rec.get("file_path")
+                active_file = Path(fpath_str) if fpath_str else None
+
+                if not active_file or not active_file.exists():
+                    active_file = self.server_obj.storage_mgr.find_active_or_recent_recording_file(
+                        title, max_age_seconds=14400, min_size_bytes=1024
+                    )
+
+                if not active_file or not active_file.exists():
+                    # Check recording folder for newest modified video file
+                    rec_folder = self.server_obj.storage_mgr.get_recording_folder()
+                    if rec_folder and rec_folder.exists():
+                        newest_f = None
+                        newest_m = 0
+                        for vf in rec_folder.iterdir():
+                            if vf.is_file() and vf.suffix.lower() in StorageManager.VIDEO_EXTENSIONS:
+                                try:
+                                    st = vf.stat()
+                                    if st.st_size > 1024 and st.st_mtime > newest_m:
+                                        newest_m = st.st_mtime
+                                        newest_f = vf
+                                except Exception:
+                                    pass
+                        if newest_f and (time.time() - newest_m) < 600:
+                            active_file = newest_f
+
+                if not active_file or not active_file.exists():
+                    self._send_json({"error": "Live stream file not yet created or buffered on disk"}, status=404)
+                    return
+
+                # Cache file path in timeshift session if applicable
+                if qid in self.server_obj.active_timeshift_sessions:
+                    self.server_obj.active_timeshift_sessions[qid]["file_path"] = str(active_file)
+
+                # Stream with live follow mode enabled
+                self._stream_file(active_file.resolve(), parsed.query, is_live=True)
                 return
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
@@ -395,7 +603,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     self._send_json({"error": "Access denied"}, status=403)
                     return
 
-                self._stream_file(resolved_target, parsed.query)
+                self._stream_file(resolved_target, parsed.query, is_live=False)
                 return
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
@@ -403,13 +611,13 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
         self._send_json({"error": "Not Found"}, status=404)
 
-    def _stream_file(self, file_path: Path, query_str: str = ""):
+    def _stream_file(self, file_path: Path, query_str: str = "", is_live: bool = False):
         """Streams media file. If MPEG-2 TS (.m2t), transcodes on-the-fly to MP4 for browser compatibility."""
         qs = urllib.parse.parse_qs(query_str)
         is_raw_download = qs.get("raw", ["0"])[0] == "1"
 
         # If already mp4 or webm, or raw download requested, use standard Range streaming
-        if is_raw_download or file_path.suffix.lower() in (".mp4", ".m4v", ".webm"):
+        if not is_live and (is_raw_download or file_path.suffix.lower() in (".mp4", ".m4v", ".webm")):
             self._stream_file_with_range(file_path, is_download=is_raw_download)
             return
 
@@ -437,7 +645,13 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
             ffmpeg_bin,
             "-hide_banner",
             "-loglevel", "error",
-            "-ss", str(start_time_sec),
+        ]
+        if is_live:
+            cmd.extend(["-follow", "1"])
+        if start_time_sec > 0:
+            cmd.extend(["-ss", str(start_time_sec)])
+
+        cmd.extend([
             "-i", str(file_path),
             "-c:v", "libx264",
             "-preset", "ultrafast",
@@ -448,7 +662,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
             "-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "-f", "mp4",
             "-"
-        ]
+        ])
 
         try:
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
@@ -547,12 +761,16 @@ class KaffeineWebServer:
         config_mgr: ConfigManager,
         queue_mgr: QueueManager,
         guide_svc: GuideService,
-        storage_mgr: StorageManager
+        storage_mgr: StorageManager,
+        dbus_client: Optional[Any] = None,
+        watcher: Optional[Any] = None
     ):
         self.config_mgr = config_mgr
         self.queue_mgr = queue_mgr
         self.guide_svc = guide_svc
         self.storage_mgr = storage_mgr
+        self.dbus_client = dbus_client
+        self.watcher = watcher
 
         self.port = self.config_mgr.web_server_port
         self.bind_addr = self.config_mgr.web_server_bind
@@ -560,6 +778,7 @@ class KaffeineWebServer:
         self.active_tokens: Dict[str, float] = {}
         self.failed_attempts: Dict[str, list] = {}  # ip -> list of timestamps
         self.lockouts: Dict[str, float] = {}        # ip -> lockout until timestamp
+        self.active_timeshift_sessions: Dict[int, Dict[str, Any]] = {} # qid -> session info
         self._lock = threading.Lock()
 
     def check_rate_limit(self, client_ip: str) -> tuple[bool, int]:

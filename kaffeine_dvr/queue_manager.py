@@ -958,12 +958,16 @@ class QueueManager:
         conn.commit()
         conn.close()
 
-        if rec_data.get("kaffeine_key"):
-            if dbus_client:
-                try:
-                    dbus_client.remove_recording(rec_data["kaffeine_key"])
-                except Exception as e:
-                    print(f"Error removing Kaffeine timer: {e}")
+        if dbus_client:
+            try:
+                dbus_client.cancel_recording(
+                    key=rec_data.get("kaffeine_key"),
+                    channel=rec_data.get("channel"),
+                    title=rec_data.get("title")
+                )
+            except Exception as e:
+                print(f"Error cancelling Kaffeine recording via D-Bus: {e}")
+        elif rec_data.get("kaffeine_key"):
             try:
                 k_db = Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db"
                 if k_db.exists():

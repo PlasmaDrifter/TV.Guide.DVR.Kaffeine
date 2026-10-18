@@ -292,3 +292,108 @@ def test_web_companion_ui_anchored_epg_and_channels(web_test_env):
         data = png_resp.read()
         assert data.startswith(b"\x89PNG\r\n\x1a\n")
 
+
+def test_web_cancel_active_recording_and_dbus_cancel(web_test_env):
+    base_url = web_test_env["base_url"]
+    q_mgr = web_test_env["q_mgr"]
+    server = web_test_env["server"]
+
+    # Mock DBus client to verify cancel_recording is called
+    class DummyDBus:
+        def __init__(self):
+            self.cancelled = []
+        def cancel_recording(self, key=None, channel=None, title=None):
+            self.cancelled.append((key, channel, title))
+            return True
+
+    mock_dbus = DummyDBus()
+    server.dbus_client = mock_dbus
+
+    # Add recording with status RECORDING
+    qid = q_mgr.add_recording(
+        title="Live PD Action",
+        channel="Defy",
+        start_iso="2026-10-18T10:00:00",
+        duration_iso="01:00:00"
+    )
+    conn = q_mgr._get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE recording_queue SET status = 'RECORDING', kaffeine_key = 101 WHERE id = ?", (qid,))
+    conn.commit()
+    conn.close()
+
+    # Verify present in /api/recordings with RECORDING status and stream_url
+    with urllib.request.urlopen(f"{base_url}/api/recordings") as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        active = data.get("active", [])
+        assert len(active) == 1
+        assert active[0]["status"] == "RECORDING"
+        assert active[0]["stream_url"] == f"/api/stream/active/{qid}"
+
+    # Cancel recording via DELETE /api/schedule/<id>
+    del_req = urllib.request.Request(f"{base_url}/api/schedule/{qid}", method="DELETE")
+    with urllib.request.urlopen(del_req) as resp:
+        assert resp.status == 200
+        del_data = json.loads(resp.read().decode("utf-8"))
+        assert del_data.get("status") == "cancelled"
+
+    # Queue should be empty and mock_dbus should have recorded the cancel call
+    assert len(q_mgr.list_queue()) == 0
+    assert len(mock_dbus.cancelled) >= 1
+    assert mock_dbus.cancelled[0][1] == "Defy"
+    assert mock_dbus.cancelled[0][2] == "Live PD Action"
+
+
+def test_web_timeshift_start_and_stop(web_test_env):
+    base_url = web_test_env["base_url"]
+    q_mgr = web_test_env["q_mgr"]
+    server = web_test_env["server"]
+
+    class DummyDBus:
+        def __init__(self):
+            self.scheduled = []
+            self.cancelled = []
+        def schedule_recording(self, channel, name, start_iso, duration_iso):
+            self.scheduled.append((channel, name))
+            return 999
+        def cancel_recording(self, key=None, channel=None, title=None):
+            self.cancelled.append((key, channel, title))
+            return True
+
+    mock_dbus = DummyDBus()
+    server.dbus_client = mock_dbus
+
+    # Start timeshift session via POST /api/timeshift/start
+    ts_payload = json.dumps({
+        "title": "Local Eyewitness News",
+        "channel": "KSTP-DT",
+        "start_iso": "2026-10-18T12:00:00",
+        "duration_iso": "00:30:00"
+    }).encode("utf-8")
+
+    req = urllib.request.Request(f"{base_url}/api/timeshift/start", data=ts_payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data.get("status") == "ok"
+        qid = data.get("queue_id")
+        assert qid is not None
+        assert data.get("stream_url") == f"/api/stream/active/{qid}"
+
+    # Verify session is tracked in server
+    assert qid in server.active_timeshift_sessions
+
+    # Stop timeshift session via POST /api/timeshift/stop
+    stop_payload = json.dumps({"queue_id": qid}).encode("utf-8")
+    stop_req = urllib.request.Request(f"{base_url}/api/timeshift/stop", data=stop_payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(stop_req) as resp:
+        assert resp.status == 200
+        stop_data = json.loads(resp.read().decode("utf-8"))
+        assert stop_data.get("status") == "stopped"
+
+    # Verify session is cleaned up
+    assert qid not in server.active_timeshift_sessions
+    assert len(q_mgr.list_queue()) == 0
+    assert len(mock_dbus.cancelled) >= 1
+
+

@@ -6211,7 +6211,14 @@ class MainWindow(QMainWindow):
         self._save_indicator_timer = None
         self._grid_scroll_anim = None
 
-        self.web_server = KaffeineWebServer(self.config_mgr, self.queue_mgr, self.guide_service, self.storage_mgr)
+        self.web_server = KaffeineWebServer(
+            self.config_mgr,
+            self.queue_mgr,
+            self.guide_service,
+            self.storage_mgr,
+            dbus_client=self.dbus_client,
+            watcher=self.watcher
+        )
         if self.config_mgr.web_server_enabled and not os.environ.get("PYTEST_CURRENT_TEST"):
             self.web_server.start()
 

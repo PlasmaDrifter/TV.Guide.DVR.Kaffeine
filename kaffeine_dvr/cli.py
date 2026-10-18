@@ -140,7 +140,9 @@ def main():
         if args.port:
             cfg.web_server_port = args.port
         storage_mgr = StorageManager(cfg, queue_mgr)
-        web_server = KaffeineWebServer(cfg, queue_mgr, guide, storage_mgr)
+        from .watcher import Watcher
+        watcher = Watcher(dbus, queue_mgr, storage_mgr, cfg)
+        web_server = KaffeineWebServer(cfg, queue_mgr, guide, storage_mgr, dbus_client=dbus, watcher=watcher)
         print(f"Starting Kaffeine DVR Web Companion on port {cfg.web_server_port}...")
         if web_server.start():
             import time

@@ -451,8 +451,10 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="progModalSubtitle" style="font-size: 0.95rem; font-weight: 600; color: var(--accent); margin-bottom: 8px;"></div>
         <div id="progModalMeta" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;"></div>
         <div id="progModalSummary" style="font-size: 0.88rem; line-height: 1.5; color: #cbd5e1; max-height: 200px; overflow-y: auto; margin-bottom: 20px; background: #0f131a; padding: 12px; border-radius: 6px; border: 1px solid var(--card-border);"></div>
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; flex-wrap: wrap;">
           <button class="btn btn-secondary" onclick="closeProgramModal()">Close</button>
+          <button id="progModalCancelBtn" class="btn btn-danger" style="display: none;" onclick="handleProgModalCancel()">Cancel Recording</button>
+          <button id="progModalWatchBtn" class="btn btn-success" style="display: none; background: #059669; border-color: #10b981;" onclick="handleProgModalWatch()">Watch Live</button>
           <button id="progModalActionBtn" class="btn" onclick="handleProgModalAction()">Schedule Recording</button>
         </div>
       </div>
@@ -959,6 +961,15 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
+    function isProgramAiringNow(p) {
+      if (!p || !p.start_iso) return false;
+      const start = new Date(p.start_iso);
+      const durMins = p.runtime_mins || 30;
+      const end = new Date(start.getTime() + durMins * 60000);
+      const now = new Date();
+      return now >= start && now <= end;
+    }
+
     function openProgramModal(idx) {
       if (hasDragged) return;
       const p = (guideItems || [])[idx];
@@ -971,18 +982,37 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       document.getElementById("progModalSummary").textContent = p.summary || "No description provided in TV Guide listing.";
 
       const actBtn = document.getElementById("progModalActionBtn");
+      const cancelBtn = document.getElementById("progModalCancelBtn");
+      const watchBtn = document.getElementById("progModalWatchBtn");
+
+      cancelBtn.style.display = "none";
+      watchBtn.style.display = "none";
+
+      const isLive = isProgramAiringNow(p);
+
       if (p.is_recording) {
-        actBtn.textContent = "Currently Recording";
-        actBtn.className = "btn btn-secondary";
-        actBtn.disabled = true;
+        actBtn.style.display = "none";
+        cancelBtn.style.display = "inline-flex";
+        cancelBtn.textContent = "Stop Recording";
+        watchBtn.style.display = "inline-flex";
+        watchBtn.textContent = "▶ Watch Live";
       } else if (p.is_scheduled) {
-        actBtn.textContent = "Already Scheduled";
-        actBtn.className = "btn btn-secondary";
-        actBtn.disabled = true;
+        actBtn.style.display = "none";
+        cancelBtn.style.display = "inline-flex";
+        cancelBtn.textContent = "Cancel Scheduled Recording";
+        if (isLive) {
+          watchBtn.style.display = "inline-flex";
+          watchBtn.textContent = "▶ Watch Live";
+        }
       } else {
+        actBtn.style.display = "inline-flex";
         actBtn.textContent = "Schedule Recording";
         actBtn.className = "btn";
         actBtn.disabled = false;
+        if (isLive) {
+          watchBtn.style.display = "inline-flex";
+          watchBtn.textContent = "▶ Watch Live (Timeshift)";
+        }
       }
 
       document.getElementById("programModal").classList.add("active");
@@ -998,6 +1028,87 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       const p = selectedProgForModal;
       closeProgramModal();
       await scheduleShow(p);
+    }
+
+    async function handleProgModalCancel() {
+      if (!selectedProgForModal) return;
+      const p = selectedProgForModal;
+      const qid = p.queue_id;
+      if (!qid) {
+        alert("Cannot locate queue entry for this recording.");
+        return;
+      }
+      const promptText = p.is_recording
+        ? `Are you sure you want to stop recording '${p.title}'? This will halt the recording and release the TV tuner.`
+        : `Are you sure you want to cancel the scheduled recording for '${p.title}'?`;
+      if (!confirm(promptText)) return;
+
+      closeProgramModal();
+      try {
+        const resp = await apiFetch(`/api/schedule/${qid}`, { method: "DELETE" });
+        if (resp.ok) {
+          p.is_scheduled = false;
+          p.is_recording = false;
+          p.queue_id = null;
+          renderGuide();
+          loadRecordings();
+        } else {
+          alert("Failed to cancel recording.");
+        }
+      } catch (e) {
+        alert("Network error while cancelling recording.");
+      }
+    }
+
+    async function handleProgModalWatch() {
+      if (!selectedProgForModal) return;
+      const p = selectedProgForModal;
+      closeProgramModal();
+      await watchLiveShow(p);
+    }
+
+    async function watchLiveShow(p) {
+      if (p.is_recording && p.queue_id) {
+        // Show is already recording in background, stream directly
+        openVideoPlayer(`/api/stream/active/${p.queue_id}`, p.title + " (Live)", null, p.queue_id, false);
+        return;
+      }
+
+      // Show is not recording; request timeshift session
+      try {
+        const resp = await apiFetch("/api/timeshift/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: p.title || "Live TV",
+            channel: p.channel,
+            start_iso: p.start_iso,
+            duration_iso: p.duration_iso || "02:00:00"
+          })
+        });
+
+        const data = await resp.json();
+        if (resp.status === 409) {
+          alert(data.error || "Tuner is currently in use recording on another channel.");
+          return;
+        }
+        if (!resp.ok) {
+          alert("Failed to start live timeshift: " + (data.error || "Unknown error"));
+          return;
+        }
+
+        const qid = data.queue_id;
+        const streamUrl = data.stream_url;
+        const isSched = data.is_scheduled;
+        p.queue_id = qid;
+        if (!isSched) {
+          p.is_recording = true;
+          renderGuide();
+        }
+        openVideoPlayer(streamUrl, (p.title || "Live TV") + " (Live)", null, qid, !isSched);
+      } catch (e) {
+        alert("Failed to initiate live timeshift stream: " + e.message);
+      }
     }
 
     async function scheduleShowByIndex(idx) {
@@ -1055,10 +1166,10 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
           const isFinished = r.status === "COMPLETED" || !r.status;
           const isFileAvailable = !!r.file_available;
           let playBtn = "";
-          if (isFileAvailable) {
+          if (r.status === "RECORDING") {
+            playBtn = `<button class="btn btn-sm btn-success" style="background: #059669; border-color: #10b981; padding: 3px 8px; font-size: 0.75rem;" onclick="playByIndex(${idx})">▶ Watch Live</button>`;
+          } else if (isFileAvailable) {
             playBtn = `<button class="btn btn-sm" onclick="playByIndex(${idx})">▶ Play</button>`;
-          } else if (r.status === "RECORDING") {
-            playBtn = `<span class="badge badge-recording">Recording Now</span>`;
           } else if (r.status === "ARMED" || r.status === "QUEUED") {
             playBtn = `<span class="badge badge-queued">${r.status}</span>`;
           } else {
@@ -1066,8 +1177,10 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
           }
 
           let actionBtn = "";
-          if (r.id && (r.status === "QUEUED" || r.status === "ARMED")) {
-            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${r.id})">Cancel</button>`;
+          if (r.id && r.status === "RECORDING") {
+            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${r.id}, true)">Stop Rec</button>`;
+          } else if (r.id && (r.status === "QUEUED" || r.status === "ARMED")) {
+            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${r.id}, false)">Cancel</button>`;
           } else if (isFileAvailable && r.stream_url) {
             const rawDlUrl = authToken ? `${r.stream_url}?raw=1&token=${encodeURIComponent(authToken)}` : `${r.stream_url}?raw=1`;
             const dlName = escapeHtml(r.filename || ((r.title || "recording").trim().replace(/[/\\?%*:|"<>]/g, '_') + ".m2t"));
@@ -1088,26 +1201,36 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       }
     }
 
+    let currentTimeshiftQueueId = null;
+
     function playByIndex(idx) {
       const r = (window.recordingsData || [])[idx];
       if (!r) return;
-      openVideoPlayer(r.stream_url, r.title, r.filename);
+      const isLive = r.status === "RECORDING";
+      openVideoPlayer(r.stream_url, r.title + (isLive ? " (Live)" : ""), r.filename, isLive ? r.id : null, false);
     }
 
-    async function cancelRecording(id) {
-      if (!confirm("Are you sure you want to cancel this scheduled recording?")) return;
+    async function cancelRecording(id, isRecording = false) {
+      const msg = isRecording
+        ? "Are you sure you want to stop this active recording? This will halt the recording and release the TV tuner."
+        : "Are you sure you want to cancel this scheduled recording?";
+      if (!confirm(msg)) return;
       try {
         const resp = await apiFetch(`/api/schedule/${id}`, { method: "DELETE" });
         if (resp.ok) {
           loadRecordings();
+        } else {
+          alert("Failed to cancel recording.");
         }
       } catch (e) {
         alert("Failed to cancel recording.");
       }
     }
 
-    function openVideoPlayer(url, title, filename) {
+    function openVideoPlayer(url, title, filename, timeshiftQid = null, releaseOnClose = false) {
       if (!url) return;
+      currentTimeshiftQueueId = (releaseOnClose && timeshiftQid) ? timeshiftQid : null;
+
       const modal = document.getElementById("videoModal");
       const video = document.getElementById("html5VideoPlayer");
       const dlLink = document.getElementById("videoDownloadLink");
@@ -1117,9 +1240,11 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       if (!downloadName && title) {
         downloadName = title.trim().replace(/[/\\?%*:|"<>]/g, '_') + '.m2t';
       }
-      if (downloadName) {
+      if (downloadName && !timeshiftQid) {
+        dlLink.style.display = "inline-flex";
         dlLink.setAttribute("download", downloadName);
       } else {
+        dlLink.style.display = "none";
         dlLink.removeAttribute("download");
       }
 
@@ -1140,6 +1265,19 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
       video.pause();
       video.src = "";
       modal.classList.remove("active");
+
+      if (currentTimeshiftQueueId) {
+        const qidToStop = currentTimeshiftQueueId;
+        currentTimeshiftQueueId = null;
+        apiFetch("/api/timeshift/stop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ queue_id: qidToStop })
+        }).then(() => {
+          renderGuide();
+          loadRecordings();
+        }).catch(() => {});
+      }
     }
 
     function escapeHtml(str) {

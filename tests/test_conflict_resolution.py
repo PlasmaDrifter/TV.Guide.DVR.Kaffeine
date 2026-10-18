@@ -567,6 +567,80 @@ def test_delay_recording_start_updates_end_iso(isolated_queue_mgr: QueueManager)
     assert rec_after["start_iso"] == "2026-10-17T10:30:00"
     assert rec_after["duration_iso"] == "00:30:00"
     assert rec_after["end_iso"] == "2026-10-17T11:00:00"
+    assert rec_after["original_start_iso"] == "2026-10-17T10:00:00"
+
+
+def test_delayed_recording_matches_guide_tile_and_displays_border(qtbot, isolated_config: ConfigManager, isolated_queue_mgr: QueueManager):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    isolated_config.channel_map = {"ABC": "ABC", "Nosey": "Nosey"}
+    win.config_mgr = isolated_config
+    win.queue_mgr = isolated_queue_mgr
+
+    # 1. Existing show on Nosey (23:04 to 23:39)
+    isolated_queue_mgr.add_recording(
+        title="Maury",
+        channel="Nosey",
+        start_iso="2026-10-17T23:04:00",
+        duration_iso="00:35:00",
+        buffer_mins=0
+    )
+
+    prog_seinfeld = {
+        "kaffeine_channel": "ABC",
+        "channel": "ABC",
+        "show_title": "Seinfeld",
+        "episode_title": "The Shower Head",
+        "start_iso": "2026-10-17T23:30:00",
+        "duration_iso": "00:30:00",
+        "start_time_local": "11:30 PM",
+    }
+
+    # Simulate user choosing delay_upcoming
+    def mock_conflict_dialog(*args, **kwargs):
+        dlg = MagicMock()
+        dlg.exec.return_value = QDialog.DialogCode.Accepted
+        dlg.get_resolution.return_value = "delay_upcoming"
+        return dlg
+
+    import kaffeine_dvr.gui
+    orig_dialog = kaffeine_dvr.gui.RecordingConflictDialog
+    kaffeine_dvr.gui.RecordingConflictDialog = mock_conflict_dialog
+
+    try:
+        win.record_selected_guide_item(prog_seinfeld)
+
+        # 2. Check active scheduled map directly
+        active_map = isolated_queue_mgr.get_active_scheduled_map()
+        # Nominal start time (23:30) MUST be present in active_map
+        assert ("abc", "2026-10-17T23:30") in active_map
+        # Delayed start time (23:39) MUST also be present
+        assert ("abc", "2026-10-17T23:39") in active_map
+
+        # 3. win._find_scheduled_recording must return the recording for Seinfeld
+        rec_found = win._find_scheduled_recording(prog_seinfeld, active_map)
+        assert rec_found is not None
+        assert "Seinfeld" in rec_found["title"]
+        assert rec_found["original_start_iso"] == "2026-10-17T23:30:00"
+
+        # 4. In grid guide, the program tile must have _scheduled_rec populated
+        win.guide_grid_table.clearContents()
+        win._populate_grid_guide([prog_seinfeld], airdate="2026-10-17")
+
+        item = win.guide_grid_table.item(0, 47)  # 23:30 slot (col 47)
+        if not item:
+            for c in range(win.guide_grid_table.columnCount()):
+                cand = win.guide_grid_table.item(0, c)
+                if cand and cand.data(Qt.ItemDataRole.UserRole):
+                    item = cand
+                    break
+        assert item is not None
+        p_data = item.data(Qt.ItemDataRole.UserRole)
+        assert p_data["_scheduled_rec"] is not None
+        assert "Seinfeld" in p_data["_scheduled_rec"]["title"]
+    finally:
+        kaffeine_dvr.gui.RecordingConflictDialog = orig_dialog
+
 
 
 

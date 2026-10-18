@@ -11487,7 +11487,7 @@ class MainWindow(QMainWindow):
                     ch_key = (p_copy.get("kaffeine_channel") or "").strip().lower()
                     iso_key = (p_copy.get("start_iso") or "")[:16]
                     if ch_key and iso_key:
-                        p_copy["_scheduled_rec"] = grid_active_scheduled.get((ch_key, iso_key))
+                        p_copy["_scheduled_rec"] = self._find_scheduled_recording(p_copy, grid_active_scheduled)
                         p_copy["_history_rec"] = grid_history_map.get((ch_key, iso_key))
                     start_dt = p_copy.get("_parsed_start_dt")
                     end_dt = p_copy.get("_parsed_end_dt")
@@ -13381,7 +13381,7 @@ class MainWindow(QMainWindow):
             for row, p in enumerate(programs):
                 ch = (p.get("kaffeine_channel") or "").strip().lower()
                 start_iso = (p.get("start_iso") or "")[:16]
-                rec_info = active_scheduled.get((ch, start_iso))
+                rec_info = self._find_scheduled_recording(p, active_scheduled)
                 hist_info = history_map.get((ch, start_iso))
 
                 timing_info = self._get_program_timing_state(p, check_files=False)
@@ -13625,7 +13625,7 @@ class MainWindow(QMainWindow):
                 # Match active recording or past completed recording
                 ch_key = (ch or "").strip().lower()
                 iso_key = (start_iso or "")[:16]
-                scheduled_rec = active_scheduled.get((ch_key, iso_key))
+                scheduled_rec = self._find_scheduled_recording(p, active_scheduled)
                 history_rec = history_map.get((ch_key, iso_key))
 
                 # Determine timing state (past, live, upcoming)
@@ -13886,9 +13886,7 @@ class MainWindow(QMainWindow):
         summary = prog.get("summary") or "No description available."
 
         active_map = self.queue_mgr.get_active_scheduled_map()
-        ch_key = (channel or "").strip().lower()
-        iso_key = (prog.get("start_iso") or "")[:16]
-        rec_info = active_map.get((ch_key, iso_key))
+        rec_info = self._find_scheduled_recording(prog, active_map)
 
         # Smart timing state for Watch Live / Tune Channel / Play Recording button
         timing_info = self._get_program_timing_state(prog)
@@ -14041,6 +14039,89 @@ class MainWindow(QMainWindow):
                 else None
             )
 
+    def _find_scheduled_recording(
+        self,
+        prog: Optional[Dict[str, Any]],
+        active_map: Optional[Any] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Locates the active scheduled recording associated with a guide program tile.
+        Matches exact (channel, start_iso[:16]), nominal EPG start airtimes,
+        and provides smart fallback interval matching for recordings delayed by conflict resolution.
+        """
+        if not prog:
+            return None
+        if active_map is None:
+            active_map = self.queue_mgr.get_active_scheduled_map() if hasattr(self, "queue_mgr") and self.queue_mgr else None
+        if not active_map:
+            return None
+
+        # If active_map has find_recording_for_program method (ActiveScheduledMap), use it
+        if hasattr(active_map, "find_recording_for_program"):
+            return active_map.find_recording_for_program(prog)
+
+        # Fallback if active_map is a standard dict
+        ch_key = (prog.get("kaffeine_channel") or prog.get("channel") or "").strip().lower()
+        start_iso = prog.get("start_iso") or ""
+        iso_key = start_iso[:16]
+
+        if ch_key and iso_key:
+            rec = active_map.get((ch_key, iso_key))
+            if rec:
+                return rec
+
+        prog_qid = prog.get("_queue_id") or prog.get("queue_id")
+        if prog_qid:
+            for item in active_map.values():
+                if isinstance(item, dict) and item.get("id") == prog_qid:
+                    return item
+
+        if not ch_key or not start_iso:
+            return None
+
+        try:
+            start_dt = prog.get("_parsed_start_dt")
+            end_dt = prog.get("_parsed_end_dt")
+            if start_dt is None:
+                start_dt = datetime.fromisoformat(start_iso)
+                dur_iso = prog.get("duration_iso") or "00:30:00"
+                parts = [int(x) for x in dur_iso.split(":")]
+                dur = timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2] if len(parts) > 2 else 0)
+                end_dt = start_dt + dur
+                prog["_parsed_start_dt"] = start_dt
+                prog["_parsed_end_dt"] = end_dt
+        except Exception:
+            return None
+
+        prog_title = (prog.get("show_title") or prog.get("title") or "").strip().lower()
+        for r in active_map.values():
+            if not isinstance(r, dict):
+                continue
+            r_ch = (r.get("channel") or "").strip().lower()
+            if r_ch != ch_key:
+                continue
+            r_start_iso = r.get("start_iso")
+            r_end_iso = r.get("end_iso")
+            if not r_start_iso or not r_end_iso:
+                continue
+            try:
+                r_start = datetime.fromisoformat(r_start_iso)
+                r_end = datetime.fromisoformat(r_end_iso)
+            except Exception:
+                continue
+
+            if (start_dt <= r_start < end_dt) or (r_start <= start_dt < r_end):
+                r_title = (r.get("title") or "").strip().lower()
+                if prog_title and r_title:
+                    if prog_title in r_title or r_title in prog_title:
+                        active_map[(ch_key, iso_key)] = r
+                        return r
+                else:
+                    active_map[(ch_key, iso_key)] = r
+                    return r
+
+        return None
+
     def _is_program_actively_recording(self, prog: Optional[Dict[str, Any]]) -> bool:
         """
         Determines whether the given program is actively being recorded by Kaffeine DVR right now.
@@ -14057,28 +14138,15 @@ class MainWindow(QMainWindow):
         if not active_map:
             return False
 
-        ch_k = (prog.get("kaffeine_channel") or prog.get("channel") or "").strip().lower()
-        st_k = (prog.get("start_iso") or "")[:16]
-
-        if ch_k and st_k:
-            rec = active_map.get((ch_k, st_k))
-            if rec and rec.get("status") == "RECORDING":
-                return True
+        rec = self._find_scheduled_recording(prog, active_map)
+        if rec and rec.get("status") == "RECORDING":
+            return True
 
         prog_qid = prog.get("_queue_id") or prog.get("queue_id")
         if prog_qid:
             for item in active_map.values():
-                if item.get("id") == prog_qid and item.get("status") == "RECORDING":
+                if isinstance(item, dict) and item.get("id") == prog_qid and item.get("status") == "RECORDING":
                     return True
-
-        title_k = (prog.get("show_title") or prog.get("title") or "").strip().lower()
-        if ch_k and title_k:
-            for item in active_map.values():
-                if item.get("status") == "RECORDING":
-                    item_ch = (item.get("channel") or "").strip().lower()
-                    item_title = (item.get("title") or "").strip().lower()
-                    if item_ch == ch_k and (title_k in item_title or item_title in title_k):
-                        return True
 
         return False
 
@@ -15311,9 +15379,7 @@ class MainWindow(QMainWindow):
 
         # 2. Record Program pill second
         active_map = self.queue_mgr.get_active_scheduled_map()
-        ch_key = (channel or "").strip().lower()
-        iso_key = (prog.get("start_iso") or "")[:16]
-        rec_info = active_map.get((ch_key, iso_key))
+        rec_info = self._find_scheduled_recording(prog, active_map)
 
         if rec_info is None:
             _add_pill("Record Program", "#dc2626", "#b91c1c", "#991b1b", lambda: self.record_selected_guide_item(prog), "guidePillRecord")
@@ -15341,9 +15407,7 @@ class MainWindow(QMainWindow):
             return
 
         active_map = self.queue_mgr.get_active_scheduled_map()
-        ch_key = (prog.get("kaffeine_channel") or "").strip().lower()
-        iso_key = (prog.get("start_iso") or "")[:16]
-        rec_info = active_map.get((ch_key, iso_key))
+        rec_info = self._find_scheduled_recording(prog, active_map)
         if not rec_info:
             QMessageBox.information(self, "No Recording Scheduled", "This program does not have an active scheduled recording.")
             return
@@ -15393,9 +15457,7 @@ class MainWindow(QMainWindow):
             rec_title = f"{show} - {ep}" if ep else show
 
         active_map = self.queue_mgr.get_active_scheduled_map()
-        ch_key = (channel or "").strip().lower()
-        iso_key = (start_iso or "")[:16]
-        rec_info = active_map.get((ch_key, iso_key))
+        rec_info = self._find_scheduled_recording(prog, active_map)
 
         if rec_info:
             # Already queued: open buffer adjust dialog directly
@@ -15492,7 +15554,8 @@ class MainWindow(QMainWindow):
             lead = self.config_mgr.lead_time_mins
             qid = self.queue_mgr.add_recording(
                 rec_title, channel, start_iso, duration_iso,
-                lead_time_mins=lead, buffer_mins=buf_mins
+                lead_time_mins=lead, buffer_mins=buf_mins,
+                original_start_iso=prog.get("start_iso")
             )
             # Check if this program is immediately due (e.g. live or starting within lead time)
             armed = self.watcher.check_and_dispatch(notify=False)

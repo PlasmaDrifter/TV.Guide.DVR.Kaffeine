@@ -10,6 +10,91 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+class ActiveScheduledMap(dict):
+    """
+    Mapping of (channel_lower, iso_prefix) -> recording_dict for active recordings.
+    Supports matching both actual recording start times and nominal/original broadcast airtimes,
+    as well as interval-based smart fallback lookup for delayed shows.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._recordings: List[Dict[str, Any]] = []
+
+    def add_recording(self, r: Dict[str, Any]):
+        self._recordings.append(r)
+
+    def get_recordings(self) -> List[Dict[str, Any]]:
+        return self._recordings
+
+    def find_recording_for_program(self, prog: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not prog:
+            return None
+        ch_key = (prog.get("kaffeine_channel") or prog.get("channel") or "").strip().lower()
+        start_iso = prog.get("start_iso") or ""
+        iso_key = start_iso[:16]
+
+        # 1. Exact match on channel and start_iso / original_start_iso
+        if ch_key and iso_key:
+            rec = self.get((ch_key, iso_key))
+            if rec:
+                return rec
+
+        # 2. Check by queue_id if present
+        qid = prog.get("_queue_id") or prog.get("queue_id")
+        if qid:
+            for r in self._recordings:
+                if r.get("id") == qid:
+                    return r
+
+        # 3. Smart match for delayed or adjusted recordings
+        if not ch_key or not start_iso:
+            return None
+
+        try:
+            start_dt = prog.get("_parsed_start_dt")
+            end_dt = prog.get("_parsed_end_dt")
+            if start_dt is None:
+                start_dt = datetime.fromisoformat(start_iso)
+                dur_iso = prog.get("duration_iso") or "00:30:00"
+                parts = [int(x) for x in dur_iso.split(":")]
+                dur = timedelta(hours=parts[0], minutes=parts[1], seconds=parts[2] if len(parts) > 2 else 0)
+                end_dt = start_dt + dur
+                prog["_parsed_start_dt"] = start_dt
+                prog["_parsed_end_dt"] = end_dt
+        except Exception:
+            return None
+
+        prog_title = (prog.get("show_title") or prog.get("title") or "").strip().lower()
+
+        for r in self._recordings:
+            r_ch = (r.get("channel") or "").strip().lower()
+            if r_ch != ch_key:
+                continue
+            r_start_iso = r.get("start_iso")
+            r_end_iso = r.get("end_iso")
+            if not r_start_iso or not r_end_iso:
+                continue
+            try:
+                r_start = datetime.fromisoformat(r_start_iso)
+                r_end = datetime.fromisoformat(r_end_iso)
+            except Exception:
+                continue
+
+            # Check if active recording start falls within the program's scheduled broadcast window
+            if (start_dt <= r_start < end_dt) or (r_start <= start_dt < r_end):
+                r_title = (r.get("title") or "").strip().lower()
+                if prog_title and r_title:
+                    if prog_title in r_title or r_title in prog_title:
+                        if iso_key:
+                            self[(ch_key, iso_key)] = r
+                        return r
+                else:
+                    if iso_key:
+                        self[(ch_key, iso_key)] = r
+                    return r
+
+        return None
+
 
 class QueueManager:
     def __init__(self, data_dir: Optional[Path] = None):
@@ -59,9 +144,13 @@ class QueueManager:
             cur.execute("ALTER TABLE recording_queue ADD COLUMN notified INTEGER DEFAULT 0")
         if "is_timeshift" not in existing_cols:
             cur.execute("ALTER TABLE recording_queue ADD COLUMN is_timeshift INTEGER DEFAULT 0")
+        if "original_start_iso" not in existing_cols:
+            cur.execute("ALTER TABLE recording_queue ADD COLUMN original_start_iso TEXT")
+        cur.execute("UPDATE recording_queue SET original_start_iso = start_iso WHERE original_start_iso IS NULL")
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON recording_queue(status)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_queue_start ON recording_queue(start_iso)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_queue_orig_start ON recording_queue(original_start_iso)")
 
         # Recording History Table
         cur.execute("""
@@ -102,8 +191,10 @@ class QueueManager:
         duration_iso: str,
         lead_time_mins: int = 5,
         buffer_mins: int = 0,
-        is_timeshift: bool = False
+        is_timeshift: bool = False,
+        original_start_iso: Optional[str] = None
     ) -> int:
+        orig_start = original_start_iso or start_iso
         # Calculate end_iso and buffered duration
         try:
             dt_start = datetime.fromisoformat(start_iso)
@@ -150,9 +241,10 @@ class QueueManager:
                     SET title = ?, duration_iso = ?, start_time_local = ?,
                         end_iso = ?, lead_time_mins = ?, buffer_mins = ?,
                         notified = CASE WHEN ? = 1 THEN 1 ELSE notified END,
-                        is_timeshift = ?
+                        is_timeshift = ?,
+                        original_start_iso = COALESCE(original_start_iso, ?)
                     WHERE id = ?
-                """, (title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, existing_id))
+                """, (title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, orig_start, existing_id))
                 conn.commit()
             elif is_already_started:
                 cur.execute("UPDATE recording_queue SET notified = 1 WHERE id = ?", (existing_id,))
@@ -165,9 +257,9 @@ class QueueManager:
         cur.execute("""
             INSERT INTO recording_queue (
                 title, channel, start_iso, duration_iso, start_time_local,
-                end_iso, lead_time_mins, status, created_at, buffer_mins, notified, is_timeshift
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?)
-        """, (title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val))
+                end_iso, lead_time_mins, status, created_at, buffer_mins, notified, is_timeshift, original_start_iso
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?)
+        """, (title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val, orig_start))
         new_id = cur.lastrowid
         conn.commit()
         conn.close()
@@ -507,18 +599,23 @@ class QueueManager:
         conn.close()
         return rows
 
-    def get_active_scheduled_map(self) -> Dict[Any, Dict[str, Any]]:
+    def get_active_scheduled_map(self) -> ActiveScheduledMap:
         """
-        Returns a mapping of (channel_lower, start_iso[:16]) -> recording_dict
+        Returns an ActiveScheduledMap of (channel_lower, start_iso[:16]) -> recording_dict
+        and (channel_lower, original_start_iso[:16]) -> recording_dict
         for all active recordings ('QUEUED', 'ARMED', 'RECORDING').
         """
         active = self.list_queue(include_completed=False)
-        mapping = {}
+        mapping = ActiveScheduledMap()
         for r in active:
             ch = r.get("channel", "").strip().lower()
-            start = r.get("start_iso", "")[:16]
+            start = (r.get("start_iso") or "")[:16]
+            orig_start = (r.get("original_start_iso") or "")[:16]
             if ch and start:
                 mapping[(ch, start)] = r
+            if ch and orig_start:
+                mapping[(ch, orig_start)] = r
+            mapping.add_recording(r)
         return mapping
 
     def find_scheduling_conflicts(
@@ -774,11 +871,13 @@ class QueueManager:
             except Exception:
                 pass
 
+        orig_start = rec.get("original_start_iso") or rec.get("start_iso")
         cur.execute("""
             UPDATE recording_queue
-            SET start_iso = ?, duration_iso = ?, end_iso = ?, start_time_local = ?, buffer_mins = 0
+            SET start_iso = ?, duration_iso = ?, end_iso = ?, start_time_local = ?, buffer_mins = 0,
+                original_start_iso = COALESCE(original_start_iso, ?)
             WHERE id = ?
-        """, (new_start_iso, new_dur_iso, new_end_iso, start_display, queue_id))
+        """, (new_start_iso, new_dur_iso, new_end_iso, start_display, orig_start, queue_id))
         conn.commit()
         conn.close()
 

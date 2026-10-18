@@ -163,13 +163,16 @@ class QueueManager:
                 duration_iso TEXT,
                 start_time_local TEXT,
                 completed_at TEXT,
-                file_path TEXT
+                file_path TEXT,
+                protected INTEGER DEFAULT 0
             )
         """)
         cur.execute("PRAGMA table_info(recording_history)")
         hist_cols = {col[1] for col in cur.fetchall()}
         if "file_path" not in hist_cols:
             cur.execute("ALTER TABLE recording_history ADD COLUMN file_path TEXT")
+        if "protected" not in hist_cols:
+            cur.execute("ALTER TABLE recording_history ADD COLUMN protected INTEGER DEFAULT 0")
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_hist_start ON recording_history(start_iso)")
 
@@ -1079,8 +1082,8 @@ class QueueManager:
             rec_dict = dict(rec)
             now_iso = datetime.now().isoformat()
             cur.execute("""
-                INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 rec_dict.get("title", ""),
                 rec_dict.get("channel", ""),
@@ -1088,7 +1091,8 @@ class QueueManager:
                 rec_dict.get("duration_iso", ""),
                 rec_dict.get("start_time_local", ""),
                 now_iso,
-                rec_dict.get("file_path")
+                rec_dict.get("file_path"),
+                rec_dict.get("protected", 0)
             ))
             cur.execute("DELETE FROM recording_queue WHERE id = ?", (queue_id,))
             conn.commit()
@@ -1144,8 +1148,8 @@ class QueueManager:
 
                         # Archive to history once
                         cur.execute("""
-                            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             rec.get("title", ""),
                             rec.get("channel", ""),
@@ -1153,7 +1157,8 @@ class QueueManager:
                             rec.get("duration_iso", ""),
                             rec.get("start_time_local", ""),
                             now.isoformat(),
-                            rec.get("file_path")
+                            rec.get("file_path"),
+                            rec.get("protected", 0)
                         ))
                         archived_count += 1
 
@@ -1182,24 +1187,59 @@ class QueueManager:
         """Toggles the protected status of a recording."""
         conn = self._get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT protected FROM recording_queue WHERE id = ?", (queue_id,))
+        cur.execute("SELECT protected, title, start_iso FROM recording_queue WHERE id = ?", (queue_id,))
         row = cur.fetchone()
         if not row:
             conn.close()
             return False
         new_val = 0 if row[0] else 1
         cur.execute("UPDATE recording_queue SET protected = ? WHERE id = ?", (new_val, queue_id))
+        title = row[1]
+        start_iso = row[2]
+        if title and start_iso:
+            cur.execute("UPDATE recording_history SET protected = ? WHERE title = ? AND start_iso = ?", (new_val, title, start_iso))
+        conn.commit()
+        conn.close()
+        return bool(new_val)
+
+    def toggle_history_protected(self, history_id: int) -> bool:
+        """Toggles the protected status of a history entry."""
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT protected, title, start_iso FROM recording_history WHERE id = ?", (history_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return False
+        new_val = 0 if row[0] else 1
+        cur.execute("UPDATE recording_history SET protected = ? WHERE id = ?", (new_val, history_id))
+        title = row[1]
+        start_iso = row[2]
+        if title and start_iso:
+            cur.execute("UPDATE recording_queue SET protected = ? WHERE title = ? AND start_iso = ?", (new_val, title, start_iso))
         conn.commit()
         conn.close()
         return bool(new_val)
 
     def get_protected_paths(self) -> set:
-        """Returns set of file_path strings that are protected."""
+        """Returns set of file_path strings and file names that are protected across queue and history."""
         conn = self._get_connection()
         cur = conn.cursor()
         cur.execute("SELECT file_path FROM recording_queue WHERE protected = 1 AND file_path IS NOT NULL")
-        paths = {row[0] for row in cur.fetchall() if row[0]}
+        raw_paths = [row[0] for row in cur.fetchall() if row[0]]
+        cur.execute("SELECT file_path FROM recording_history WHERE protected = 1 AND file_path IS NOT NULL")
+        raw_paths.extend([row[0] for row in cur.fetchall() if row[0]])
         conn.close()
+
+        paths = set()
+        for p_str in raw_paths:
+            paths.add(p_str)
+            try:
+                p = Path(p_str)
+                paths.add(p.name)
+                paths.add(str(p.resolve()))
+            except Exception:
+                pass
         return paths
 
     def mark_file_purged(self, file_path_str: str):
@@ -1231,16 +1271,17 @@ class QueueManager:
         start_time_local: str = "",
         completed_at: Optional[str] = None,
         file_path: Optional[str] = None,
-        max_entries: int = 50
+        max_entries: int = 50,
+        protected: int = 0
     ) -> int:
         """Directly adds an entry into the recording history table."""
         comp = completed_at or datetime.now().isoformat()
         conn = self._get_connection()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (title, channel, start_iso, duration_iso, start_time_local, comp, file_path))
+            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, channel, start_iso, duration_iso, start_time_local, comp, file_path, int(protected)))
         new_id = cur.lastrowid
         conn.commit()
         conn.close()
@@ -1271,9 +1312,10 @@ class QueueManager:
         conn.close()
         return updated
 
-    def delete_history_entry(self, history_id: int) -> bool:
+    def delete_history_entry(self, history_id: int, allow_protected: bool = False) -> bool:
         """
         Deletes a single history entry by ID.
+        If allow_protected is False and the entry is protected, deletion is blocked.
         Also clears the corresponding item from active schedule (recording_queue)
         if it is currently in COMPLETED status (within the 6-hour retention window).
         """
@@ -1287,55 +1329,68 @@ class QueueManager:
             return False
 
         h_dict = dict(hist_row)
+        if not allow_protected and bool(h_dict.get("protected", 0)):
+            conn.close()
+            return False
+
         title = h_dict.get("title", "")
         start_iso = h_dict.get("start_iso", "")
 
         cur.execute("DELETE FROM recording_history WHERE id = ?", (history_id,))
         deleted = cur.rowcount > 0
 
-        # Also clear from active schedule if present as COMPLETED
+        # Also clear from active schedule if present as COMPLETED and unprotected
         if title and start_iso:
             cur.execute("""
                 DELETE FROM recording_queue
                 WHERE status = 'COMPLETED'
                   AND title = ?
                   AND start_iso = ?
+                  AND protected = 0
             """, (title, start_iso))
 
         conn.commit()
         conn.close()
         return deleted
 
-    def clear_all_history(self) -> bool:
+    def clear_all_history(self) -> Dict[str, int]:
         """
-        Clears all records in recording history.
-        Also clears all COMPLETED entries from active schedule (recording_queue).
+        Clears unprotected records in recording history.
+        Also clears unprotected COMPLETED entries from active schedule (recording_queue).
+        Protected records are preserved and cannot be cleared until unprotected.
         """
         conn = self._get_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM recording_history")
-        cur.execute("DELETE FROM recording_queue WHERE status = 'COMPLETED'")
+        cur.execute("SELECT COUNT(*) FROM recording_history WHERE protected = 1")
+        prot_hist = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM recording_history WHERE protected = 0")
+        del_hist = cur.fetchone()[0]
+
+        cur.execute("DELETE FROM recording_history WHERE protected = 0")
+        cur.execute("DELETE FROM recording_queue WHERE status = 'COMPLETED' AND protected = 0")
         conn.commit()
         conn.close()
-        return True
+        return {"deleted": del_hist, "protected_kept": prot_hist}
 
     def prune_history(self, max_entries: int):
         """
         Retains only the newest `max_entries` records in recording_history,
-        removing the oldest entries exceeding the threshold.
+        removing the oldest unprotected entries exceeding the threshold.
+        Protected records are never pruned.
         """
         if max_entries <= 0:
             return
         conn = self._get_connection()
         cur = conn.cursor()
-        # Delete entries where ID is not among the top max_entries
+        # Delete unprotected entries where ID is not among the top max_entries
         cur.execute("""
             DELETE FROM recording_history
-            WHERE id NOT IN (
-                SELECT id FROM recording_history
-                ORDER BY id DESC
-                LIMIT ?
-            )
+            WHERE protected = 0
+              AND id NOT IN (
+                  SELECT id FROM recording_history
+                  ORDER BY id DESC
+                  LIMIT ?
+              )
         """, (max_entries,))
         conn.commit()
         conn.close()

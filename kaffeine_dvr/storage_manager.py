@@ -237,7 +237,7 @@ class StorageManager:
         if delete_all:
             for item in all_files:
                 fpath = item["path"]
-                if not include_protected and str(fpath) in protected_paths:
+                if not include_protected and (str(fpath) in protected_paths or fpath.name in protected_paths):
                     continue
                 if self.is_file_active_recording(fpath):
                     continue
@@ -254,7 +254,7 @@ class StorageManager:
 
                 for item in all_files:
                     fpath = item["path"]
-                    if str(fpath) in protected_paths:
+                    if str(fpath) in protected_paths or fpath.name in protected_paths:
                         continue
                     if self.is_file_active_recording(fpath):
                         continue
@@ -280,7 +280,7 @@ class StorageManager:
                             break
 
                         fpath = item["path"]
-                        if str(fpath) in protected_paths:
+                        if str(fpath) in protected_paths or fpath.name in protected_paths:
                             continue
                         if self.is_file_active_recording(fpath):
                             continue

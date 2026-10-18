@@ -134,10 +134,11 @@ def test_gui_active_schedule_status_and_history_updates(qtbot, isolated_config: 
     assert win.rec_table.columnCount() == 7
     assert win.rec_table.horizontalHeaderItem(0).text() == "Watch"
     assert win.rec_table.horizontalHeaderItem(1).text() == "Title"
-    assert win.history_table.columnCount() == 6
+    assert win.history_table.columnCount() == 7
     assert win.history_table.horizontalHeaderItem(0).text() == "Watch"
     assert win.history_table.horizontalHeaderItem(1).text() == "Title"
     assert win.history_table.horizontalHeaderItem(5).text() == "Status"
+    assert win.history_table.horizontalHeaderItem(6).text() == "Retain"
 
     # Initially empty
     win.refresh_recordings(force=True)
@@ -394,7 +395,7 @@ def test_gui_recording_schedule_column_placements_persistence(qtbot, isolated_co
     rec_h.resizeSection(2, 350)
     s.setValue("rec_table_header_state", rec_h.saveState())
 
-    mock_hist = QTableWidget(1, 6)
+    mock_hist = QTableWidget(1, 7)
     hist_h = mock_hist.horizontalHeader()
     hist_h.setSectionsMovable(True)
     hist_h.moveSection(3, 1)
@@ -423,7 +424,7 @@ def test_gui_recording_schedule_column_placements_persistence(qtbot, isolated_co
     # Resize a column on history table and verify settings update
     win.history_table.horizontalHeader().resizeSection(1, 410)
     saved_hist_bytes = win.settings.value("history_table_header_state")
-    check_hist = QTableWidget(1, 6)
+    check_hist = QTableWidget(1, 7)
     check_hist.horizontalHeader().restoreState(saved_hist_bytes)
     assert check_hist.horizontalHeader().sectionSize(1) == 410
 
@@ -581,7 +582,184 @@ def test_gui_grid_guide_preserves_manual_scroll_on_tab_switch_and_smooth_jump(qt
     assert bar.value() == 0
 
 
+def test_protected_history_persistence_and_sync(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
 
+    # 1. Add queue item and mark protected
+    start_iso = "2026-10-18T10:00:00"
+    qid = qm.add_recording("Protected Movie", "HBO 5.1", start_iso, "02:00:00")
+    qm.toggle_protected(qid)
+    rec = qm.get_recording(qid)
+    assert rec["protected"] == 1
+
+    # 2. Archive to history: protected status must carry over
+    qm.archive_to_history(qid)
+    hist = qm.list_history()
+    assert len(hist) == 1
+    assert hist[0]["title"] == "Protected Movie"
+    assert hist[0]["protected"] == 1
+
+    # 3. Toggle protected from history side: updates history and syncs with queue
+    hid = hist[0]["id"]
+    new_state = qm.toggle_history_protected(hid)
+    assert new_state is False
+    hist_updated = qm.list_history()
+    assert hist_updated[0]["protected"] == 0
+
+    # Toggle back to protected
+    new_state = qm.toggle_history_protected(hid)
+    assert new_state is True
+    assert qm.list_history()[0]["protected"] == 1
+
+
+def test_protected_history_cannot_be_cleared_until_unprotected(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+
+    # Add protected history entry
+    hid = qm.add_history_entry(
+        "Important Documentary", "PBS 10.1", "2026-10-17T18:00:00", "01:00:00",
+        file_path="/home/jmc/Videos/doc.ts", protected=1
+    )
+
+    # Attempt to delete while protected: must return False and not delete
+    assert qm.delete_history_entry(hid, allow_protected=False) is False
+    hist = qm.list_history()
+    assert len(hist) == 1
+    assert hist[0]["title"] == "Important Documentary"
+
+    # Unprotect it
+    qm.toggle_history_protected(hid)
+    assert qm.list_history()[0]["protected"] == 0
+
+    # Now deletion must succeed
+    assert qm.delete_history_entry(hid, allow_protected=False) is True
+    assert len(qm.list_history()) == 0
+
+
+def test_clear_all_history_preserves_protected_entries(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+
+    # Add 2 protected entries and 2 unprotected entries
+    qm.add_history_entry("Unprotected Show 1", "NBC 4.1", "2026-10-18T08:00:00", "00:30:00", protected=0)
+    h_prot1 = qm.add_history_entry("Protected Show 1", "CBS 6.1", "2026-10-18T09:00:00", "01:00:00", protected=1)
+    qm.add_history_entry("Unprotected Show 2", "FOX 12.1", "2026-10-18T10:00:00", "00:30:00", protected=0)
+    h_prot2 = qm.add_history_entry("Protected Show 2", "ABC 2.1", "2026-10-18T11:00:00", "01:00:00", protected=1)
+
+    assert len(qm.list_history()) == 4
+
+    # Clear all history: must delete only unprotected items and preserve protected ones
+    res = qm.clear_all_history()
+    assert res["deleted"] == 2
+    assert res["protected_kept"] == 2
+
+    remaining = qm.list_history()
+    assert len(remaining) == 2
+    remaining_ids = {item["id"] for item in remaining}
+    assert remaining_ids == {h_prot1, h_prot2}
+
+
+def test_prune_history_preserves_protected_entries(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+
+    # Add 1 protected show that is oldest
+    prot_old = qm.add_history_entry("Old Classic Protected", "TCM", "2026-10-01T00:00:00", "02:00:00", protected=1)
+
+    # Add 10 newer unprotected shows
+    for i in range(10):
+        qm.add_history_entry(f"Daily News {i}", "CNN", f"2026-10-18T{i:02d}:00:00", "00:30:00", protected=0)
+
+    assert len(qm.list_history()) == 11
+
+    # Prune to max 3 entries: protected old show must NEVER be pruned!
+    qm.prune_history(3)
+    hist = qm.list_history()
+
+    # The oldest protected show must still be present
+    hist_ids = [h["id"] for h in hist]
+    assert prot_old in hist_ids
+    # And protected status maintained
+    prot_entry = next(h for h in hist if h["id"] == prot_old)
+    assert prot_entry["protected"] == 1
+
+
+def test_storage_cleanup_preserves_protected_history_files(tmp_path: Path, isolated_queue_mgr: QueueManager, isolated_config: ConfigManager):
+    import os
+    from kaffeine_dvr.storage_manager import StorageManager
+
+    rec_folder = tmp_path / "Recordings"
+    rec_folder.mkdir()
+    isolated_config.custom_recording_folder = str(rec_folder)
+    isolated_config.auto_cleanup_enabled = True
+    isolated_config.retention_days = 2
+
+    sm = StorageManager(config_mgr=isolated_config, queue_mgr=isolated_queue_mgr)
+
+    # Create two video files on disk older than 2 days
+    old_time = (datetime.now() - timedelta(days=5)).timestamp()
+
+    unprotected_file = rec_folder / "Old_Unprotected_Show.m2t"
+    unprotected_file.write_bytes(b"x" * 1024 * 100)
+    os.utime(unprotected_file, (old_time, old_time))
+
+    protected_file = rec_folder / "Old_Protected_Show.m2t"
+    protected_file.write_bytes(b"x" * 1024 * 100)
+    os.utime(protected_file, (old_time, old_time))
+
+    # Register protected show in history with protected=1
+    isolated_queue_mgr.add_history_entry(
+        "Old Protected Show", "Channel 1", "2026-10-10T12:00:00", "01:00:00",
+        file_path=str(protected_file), protected=1
+    )
+
+    # Verify protected_file is detected in get_protected_paths
+    prot_paths = isolated_queue_mgr.get_protected_paths()
+    assert str(protected_file) in prot_paths or protected_file.name in prot_paths
+
+    # Run cleanup cycle: unprotected must be deleted, protected must remain intact!
+    res = sm.run_cleanup_cycle()
+    assert res["deleted_count"] == 1
+    assert not unprotected_file.exists()
+    assert protected_file.exists()
+
+
+def test_cancelling_recording_clears_guide_detail_panel(qtbot, isolated_config: ConfigManager):
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    # 1. Add a scheduled recording to the queue
+    start_iso = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    prog = {
+        "show_title": "Evening News Tonight",
+        "kaffeine_channel": "NBC 4.1",
+        "channel": "NBC 4.1",
+        "start_iso": start_iso,
+        "duration_iso": "01:00:00",
+        "summary": "Evening news broadcast.",
+        "start_time_local": "18:00",
+    }
+    qid = win.queue_mgr.add_recording(
+        prog["show_title"], prog["channel"], prog["start_iso"], prog["duration_iso"]
+    )
+    win.refresh_recordings(force=True)
+
+    # 2. Select this program in the guide and display details
+    win.selected_grid_program = prog
+    win._display_program_details(prog)
+
+    # Verify that the detail panel shows the recording tag and program details
+    assert "QUEUED" in win.guide_detail_title.text()
+    assert "Evening News Tonight" in win.guide_detail_title.text()
+    assert not win.cancel_guide_btn.isHidden()
+
+    # 3. Cancel the recording via cancel_selected_guide_recording
+    win.dbus_client.cancel_recording = MagicMock()
+    win.cancel_selected_guide_recording(prog)
+
+    # Verify that the detail panel is reset and selection is cleared
+    assert win.selected_grid_program is None
+    assert win.guide_detail_title.text() == "Select a program to view details"
+    assert win.guide_detail_text.toPlainText() == ""
+    assert win.cancel_guide_btn.isHidden()
 
 
 

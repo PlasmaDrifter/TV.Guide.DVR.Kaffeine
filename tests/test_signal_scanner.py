@@ -260,15 +260,15 @@ def test_channel_signal_health_dialog(qtbot, isolated_config):
             dlg.stop_aiming()
             assert dlg.aim_card.isHidden()
 
-        # Test Close Kaffeine button triggers Quit on app proxy
-        mock_iface = MagicMock()
-        mock_dbus.Interface.return_value = mock_iface
-        dlg._close_kaffeine_app()
-        assert mock_iface.Quit.called
+            # Test Close Kaffeine button triggers Quit on app proxy
+            mock_iface = MagicMock()
+            mock_dbus.Interface.return_value = mock_iface
+            dlg._close_kaffeine_app()
+            qtbot.waitUntil(lambda: mock_iface.Quit.called, timeout=3000)
 
-        # Close dialog and verify cleanup stops playback
-        dlg.close()
-        assert mock_iface.Stop.called
+            # Close dialog and verify cleanup stops playback
+            dlg.close()
+            assert mock_iface.Stop.called
 
 
 def test_channel_order_signal_icons_and_badge(qtbot, isolated_config):

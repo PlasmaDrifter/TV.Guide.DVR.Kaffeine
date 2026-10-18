@@ -6474,6 +6474,11 @@ class MainWindow(QMainWindow):
         hist_ctrl_bar.addWidget(self.hist_max_spin)
 
         hist_ctrl_bar.addSpacing(16)
+        self.toggle_hist_protect_btn = QPushButton("Toggle Retain")
+        self.toggle_hist_protect_btn.clicked.connect(self.toggle_protect_selected_history_entry)
+        hist_ctrl_bar.addWidget(self.toggle_hist_protect_btn)
+
+        hist_ctrl_bar.addSpacing(8)
         self.clear_hist_entry_btn = QPushButton("Clear Entry")
         self.clear_hist_entry_btn.clicked.connect(self.clear_selected_history_entry)
         hist_ctrl_bar.addWidget(self.clear_hist_entry_btn)
@@ -6488,10 +6493,10 @@ class MainWindow(QMainWindow):
 
         # History Table
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(6)
-        self.history_table.setHorizontalHeaderLabels(["Watch", "Title", "Date / Time", "Channel", "Runtime", "Status"])
+        self.history_table.setColumnCount(7)
+        self.history_table.setHorizontalHeaderLabels(["Watch", "Title", "Date / Time", "Channel", "Runtime", "Status", "Retain"])
         hist_hdr = self.history_table.horizontalHeader()
-        for i in range(6):
+        for i in range(7):
             hist_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         hist_hdr.setSectionsMovable(True)
         saved_hist_hdr = self.settings.value("history_table_header_state")
@@ -6500,6 +6505,9 @@ class MainWindow(QMainWindow):
                 hist_hdr.restoreState(saved_hist_hdr)
             except Exception:
                 pass
+        if hist_hdr.count() != 7:
+            self.history_table.setColumnCount(7)
+            self.history_table.setHorizontalHeaderLabels(["Watch", "Title", "Date / Time", "Channel", "Runtime", "Status", "Retain"])
         hist_hdr.sectionMoved.connect(self._save_history_table_header_state)
         hist_hdr.sectionResized.connect(self._save_history_table_header_state)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -10420,9 +10428,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "history_table") and not self.settings.contains("history_table_header_state"):
             hist_w = self.history_table.viewport().width()
             if hist_w > 100:
-                # Watch, Title, Date / Time, Channel, Runtime, Status
-                min_widths = [90, 190, 150, 75, 85, 130]
-                shares = [0.09, 0.30, 0.22, 0.10, 0.11, 0.18]
+                # Watch, Title, Date / Time, Channel, Runtime, Status, Retain
+                min_widths = [90, 190, 140, 65, 85, 130, 55]
+                shares = [0.09, 0.28, 0.20, 0.08, 0.10, 0.19, 0.06]
                 allocated = [max(mw, int(hist_w * s)) for mw, s in zip(min_widths, shares)]
                 diff = hist_w - sum(allocated)
                 if diff > 0:
@@ -12108,7 +12116,7 @@ class MainWindow(QMainWindow):
         hist_fp = (
             folder_mtime,
             tuple(
-                (item.get("id"), item.get("title"), item.get("channel"), item.get("start_iso"), item.get("duration_iso"), item.get("file_path"))
+                (item.get("id"), item.get("title"), item.get("channel"), item.get("start_iso"), item.get("duration_iso"), item.get("file_path"), item.get("protected", 0))
                 for item in hist
             )
         )
@@ -12203,6 +12211,19 @@ class MainWindow(QMainWindow):
             status_item.setToolTip(tooltip_text)
             self.history_table.setItem(row, 5, status_item)
 
+            # Column 6: Retain / Protected
+            is_prot = bool(item.get("protected", 0))
+            prot_item = QTableWidgetItem("Protected" if is_prot else "Auto")
+            prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if is_prot:
+                prot_item.setForeground(QColor("#28a745"))
+                prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                prot_item.setToolTip("Protected: Will not be cleared from history or deleted by auto-cleanup.")
+            else:
+                prot_item.setForeground(QColor("#a0aec0"))
+                prot_item.setToolTip("Auto: Eligible for auto-cleanup and history clearing.")
+            self.history_table.setItem(row, 6, prot_item)
+
         if restored_row >= 0:
             self.history_table.setCurrentCell(restored_row, 1)
 
@@ -12213,6 +12234,22 @@ class MainWindow(QMainWindow):
         self.queue_mgr.prune_history(val)
         self.refresh_history(force=True)
 
+    def toggle_protect_selected_history_entry(self):
+        row = self.history_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Selection Required", "Please select a history entry to toggle protection.")
+            return
+
+        title_it = self.history_table.item(row, 1) or self.history_table.item(row, 0)
+        hid = title_it.data(Qt.ItemDataRole.UserRole) if title_it else None
+        rec_title = self.history_table.item(row, 1).text() if self.history_table.item(row, 1) else (title_it.text() if title_it else "")
+        if hid:
+            new_state = self.queue_mgr.toggle_history_protected(int(hid))
+            state_str = "Protected (Keep Forever)" if new_state else "Standard (Auto-cleanup / clear eligible)"
+            self.status_bar.showMessage(f"'{rec_title}' is now {state_str}.", 4000)
+            self.refresh_history(force=True)
+            self.refresh_recordings(force=True)
+
     def clear_selected_history_entry(self):
         row = self.history_table.currentRow()
         if row < 0:
@@ -12222,8 +12259,21 @@ class MainWindow(QMainWindow):
         it = self.history_table.item(row, 1) or self.history_table.item(row, 0)
         hid = it.data(Qt.ItemDataRole.UserRole) if it else None
         title = self.history_table.item(row, 1).text() if self.history_table.item(row, 1) else (it.text() if it else "")
-        if hid:
-            self.queue_mgr.delete_history_entry(int(hid))
+        if not hid:
+            return
+
+        # Check if protected
+        hist_list = self.queue_mgr.list_history()
+        item = next((h for h in hist_list if h.get("id") == int(hid)), None)
+        if item and bool(item.get("protected", 0)):
+            QMessageBox.warning(
+                self, "Protected Recording",
+                f"Cannot clear '{title}' from history because it is Protected.\n\n"
+                "Please unprotect this recording first (double-click 'Protected' in the Retain column or click 'Toggle Retain') to allow clearing it."
+            )
+            return
+
+        if self.queue_mgr.delete_history_entry(int(hid)):
             self.status_bar.showMessage(f"Removed '{title}' from history.", 3000)
             self.refresh_history(force=True)
             self.refresh_recordings(force=True)
@@ -12232,14 +12282,39 @@ class MainWindow(QMainWindow):
         count = self.history_table.rowCount()
         if count == 0:
             return
+
+        hist = self.queue_mgr.list_history()
+        protected_count = sum(1 for h in hist if bool(h.get("protected", 0)))
+
+        if protected_count == count:
+            QMessageBox.information(
+                self, "All Recordings Protected",
+                f"All {count} history entries are Protected.\n\n"
+                "Protected recordings cannot be cleared. To clear them, unprotect them first."
+            )
+            return
+
+        if protected_count > 0:
+            confirm_msg = (
+                f"Clear {count - protected_count} unprotected history entries?\n\n"
+                f"{protected_count} protected recording(s) will be kept in history and will not be deleted."
+            )
+        else:
+            confirm_msg = f"Are you sure you want to clear all {count} history entries?"
+
         confirm = QMessageBox.question(
             self, "Clear History",
-            f"Are you sure you want to clear all {count} history entries?",
+            confirm_msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if confirm == QMessageBox.StandardButton.Yes:
-            self.queue_mgr.clear_all_history()
-            self.status_bar.showMessage("Recording history cleared.", 3000)
+            res = self.queue_mgr.clear_all_history()
+            deleted = res.get("deleted", 0)
+            kept = res.get("protected_kept", 0)
+            if kept > 0:
+                self.status_bar.showMessage(f"Cleared {deleted} history entries ({kept} protected kept).", 4000)
+            else:
+                self.status_bar.showMessage("Recording history cleared.", 3000)
             self.refresh_history(force=True)
             self.refresh_recordings(force=True)
 
@@ -12267,6 +12342,10 @@ class MainWindow(QMainWindow):
         row = item.row()
         self.history_table.selectRow(row)
         self.history_table.setCurrentCell(row, item.column())
+        col = item.column()
+        if col == 6:  # Retain / Protect column
+            self.toggle_protect_selected_history_entry()
+            return
         title_it = self.history_table.item(row, 1) or self.history_table.item(row, 0)
         if not title_it:
             return
@@ -12431,6 +12510,16 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
         self.refresh_recordings()
         self._refresh_guide_view(keep_scroll=True)
+        # Clear program detail panel / guide selection if active program matches cancelled recording
+        sel_prog = self._get_active_selected_program()
+        if sel_prog:
+            active_map = self.queue_mgr.get_active_scheduled_map()
+            if not self._find_scheduled_recording(sel_prog, active_map):
+                # Clean up cached attributes
+                sel_prog.pop("_scheduled_rec", None)
+                sel_prog.pop("_queue_id", None)
+                self.clear_guide_selection()
+
 
     def add_manual_recording(self):
         channels = self.config_mgr.get_ordered_channels()
@@ -15574,7 +15663,10 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
         self.refresh_recordings()
         self._refresh_guide_view(keep_scroll=True)
-        self._display_program_details(prog)
+        prog.pop("_scheduled_rec", None)
+        prog.pop("_queue_id", None)
+        self.clear_guide_selection()
+
 
     def _refresh_guide_view(self, keep_scroll: bool = True):
         airdate = self.guide_date_combo.currentData() if hasattr(self, "guide_date_combo") else None

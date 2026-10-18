@@ -11007,6 +11007,14 @@ class MainWindow(QMainWindow):
             target_custom_grid.addWidget(chip, row_idx, col_idx, Qt.AlignmentFlag.AlignCenter)
             self._guide_theme_chips[p_key] = chip
 
+        # Enforce column widths and spacers so columns 0 and 1 remain identical width, keeping Custom permanently centered
+        if hasattr(target_custom_grid, "setColumnMinimumWidth"):
+            target_custom_grid.setColumnMinimumWidth(0, custom_saved_w)
+            target_custom_grid.setColumnMinimumWidth(1, custom_saved_w)
+        if hasattr(target_custom_grid, "addItem"):
+            target_custom_grid.addItem(QSpacerItem(custom_saved_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 0)
+            target_custom_grid.addItem(QSpacerItem(custom_saved_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 1)
+
         p_idx = self.theme_preset_combo.findData(cur_preset)
         self.theme_preset_combo.setCurrentIndex(max(p_idx, 0))
         self.theme_preset_combo.blockSignals(False)

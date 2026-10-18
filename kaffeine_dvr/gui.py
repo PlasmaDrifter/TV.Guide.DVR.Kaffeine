@@ -50,6 +50,8 @@ from PyQt6.QtGui import (
     QPolygon,
     QPolygonF,
     QShortcut,
+    QSyntaxHighlighter,
+    QTextCharFormat,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import (
@@ -532,6 +534,80 @@ class BaseFramelessDialog(QDialog):
         painter.drawRoundedRect(rect, 10, 10)
 
 
+class ServiceLogsHighlighter(QSyntaxHighlighter):
+    """
+    Syntax highlighter for systemd journalctl service logs.
+    Renders prefixes and labels before colons in high-contrast accent colors
+    for effortless readability.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Prefix format (before first syslog colon): vibrant sky blue
+        self.prefix_fmt = QTextCharFormat()
+        self.prefix_fmt.setForeground(QColor("#60a5fa"))
+        self.prefix_fmt.setFontWeight(QFont.Weight.Medium)
+
+        # Primary colon format: bright accent
+        self.colon_fmt = QTextCharFormat()
+        self.colon_fmt.setForeground(QColor("#93c5fd"))
+        self.colon_fmt.setFontWeight(QFont.Weight.Bold)
+
+        # Body/message format (after colon): clean readable slate
+        self.body_fmt = QTextCharFormat()
+        self.body_fmt.setForeground(QColor("#e2e8f0"))
+
+        # Inner timestamp format [YYYY-MM-DD HH:MM:SS]: muted slate
+        self.time_inner_fmt = QTextCharFormat()
+        self.time_inner_fmt.setForeground(QColor("#94a3b8"))
+
+        # Inner category format before second colon: vibrant cyan
+        self.sub_prefix_fmt = QTextCharFormat()
+        self.sub_prefix_fmt.setForeground(QColor("#38bdf8"))
+        self.sub_prefix_fmt.setFontWeight(QFont.Weight.Medium)
+
+        self.p_syslog = re.compile(r"^([A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\S+\s+[^:]+)(:)(.*)$")
+        self.p_generic = re.compile(r"^([^:\n]+)(:)(.*)$")
+        self.p_inner = re.compile(r"^(\s*)(\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\])(\s*)([^:\n]+)(:)(.*)$")
+
+    def highlightBlock(self, text: str):
+        if not text:
+            return
+        m = self.p_syslog.match(text)
+        if not m:
+            m = self.p_generic.match(text)
+        if m:
+            p_len = len(m.group(1))
+            c_len = len(m.group(2))
+            body_txt = m.group(3)
+            self.setFormat(0, p_len, self.prefix_fmt)
+            self.setFormat(p_len, c_len, self.colon_fmt)
+
+            # Check if inner message has its own timestamp and category before colon
+            m_in = self.p_inner.match(body_txt)
+            if m_in:
+                offset = p_len + c_len
+                sp1_len = len(m_in.group(1))
+                time_len = len(m_in.group(2))
+                sp2_len = len(m_in.group(3))
+                cat_len = len(m_in.group(4))
+                col2_len = len(m_in.group(5))
+                rest_len = len(m_in.group(6))
+
+                # Inner timestamp
+                self.setFormat(offset + sp1_len, time_len, self.time_inner_fmt)
+                # Inner category
+                self.setFormat(offset + sp1_len + time_len + sp2_len, cat_len, self.sub_prefix_fmt)
+                # Inner colon
+                self.setFormat(offset + sp1_len + time_len + sp2_len + cat_len, col2_len, self.colon_fmt)
+                # Rest of line
+                if rest_len > 0:
+                    self.setFormat(offset + sp1_len + time_len + sp2_len + cat_len + col2_len, rest_len, self.body_fmt)
+            elif len(body_txt) > 0:
+                self.setFormat(p_len + c_len, len(body_txt), self.body_fmt)
+        else:
+            self.setFormat(0, len(text), self.body_fmt)
+
+
 class ServiceLogsDialog(BaseFramelessDialog):
     """
     Log viewer dialog displaying recent journalctl entries for kaffeine-dvr-watcher.service.
@@ -540,7 +616,7 @@ class ServiceLogsDialog(BaseFramelessDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Background Watcher Service Logs")
-        self.resize(860, 560)
+        self.resize(1180, 680)
         self.raw_logs = ""
         self._worker = None
 
@@ -606,6 +682,7 @@ class ServiceLogsDialog(BaseFramelessDialog):
         self.log_view.setStyleSheet(
             "QPlainTextEdit { background-color: #0f1218; color: #d0d8e2; border: 1px solid #2b3242; border-radius: 4px; padding: 8px; }"
         )
+        self.highlighter = ServiceLogsHighlighter(self.log_view.document())
         layout.addWidget(self.log_view, 1)
 
         # Footer

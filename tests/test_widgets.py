@@ -1284,6 +1284,41 @@ def test_shortcuts_tab_layout_and_no_scrollbar(qtbot, isolated_config):
     assert tab.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
 
 
+def test_service_logs_dialog_width_and_highlighter(qtbot):
+    from kaffeine_dvr.gui import ServiceLogsDialog, ServiceLogsHighlighter
+
+    dlg = ServiceLogsDialog()
+    qtbot.addWidget(dlg)
+
+    # 1. Dialog width is widened for improved readability
+    assert dlg.width() >= 1180
+    assert dlg.height() >= 650
+    assert hasattr(dlg, "highlighter")
+    assert isinstance(dlg.highlighter, ServiceLogsHighlighter)
+
+    # 2. Syntax highlighting applies to prefix before colon
+    sample_log = (
+        "Oct 17 19:51:49 linux kaffeine-dvr[2088]: [2026-10-17 19:51:49] Back-to-Back Handover Tuned: Stopped 'Dateline'\n"
+        "Failed to fetch journal logs: Connection refused\n"
+        "Normal line without colon"
+    )
+    dlg.raw_logs = sample_log
+    dlg._apply_filter()
+
+    # Block 1: Syslog line
+    block1 = dlg.log_view.document().findBlockByNumber(0)
+    formats1 = block1.layout().formats()
+    assert len(formats1) >= 2
+    # Prefix format: #60a5fa
+    assert formats1[0].format.foreground().color().name() == "#60a5fa"
+
+    # Block 2: Generic prefix line
+    block2 = dlg.log_view.document().findBlockByNumber(1)
+    formats2 = block2.layout().formats()
+    assert len(formats2) >= 2
+    assert formats2[0].format.foreground().color().name() == "#60a5fa"
+
+
 
 
 

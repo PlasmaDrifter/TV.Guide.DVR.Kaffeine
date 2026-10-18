@@ -87,6 +87,7 @@ from PyQt6.QtWidgets import (
     QSizeGrip,
     QSizePolicy,
     QSlider,
+    QSpacerItem,
     QSpinBox,
     QStackedWidget,
     QStatusBar,
@@ -10884,6 +10885,8 @@ class MainWindow(QMainWindow):
             item = self.app_theme_grid.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
+                w.setParent(None)
                 w.deleteLater()
         self._app_theme_chips.clear()
 

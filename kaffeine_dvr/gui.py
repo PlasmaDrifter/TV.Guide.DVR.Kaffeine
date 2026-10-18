@@ -8563,7 +8563,7 @@ class MainWindow(QMainWindow):
         self.web_enable_check = QCheckBox("Enable Local / Tailscale Web Companion")
         self.web_enable_check.setChecked(self.config_mgr.web_server_enabled)
         web_form.addRow(
-            make_setting_label("Web Access:", "Run a secure web companion server to browse the TV guide, schedule shows, and stream videos from your phone, tablet, or remote PC over Tailscale/LAN. Tip: If you use Tailscale, you don't need to open or touch any firewall ports at all—devices on your Tailnet can connect both at home and away. If connecting directly over your local Wi-Fi/LAN without Tailscale, allow the port for your home subnet: sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.168.1.0/24\" port port=\"8086\" protocol=\"tcp\" accept' --permanent && sudo firewall-cmd --reload."),
+            make_setting_label("Web Access:", "Run a secure web companion server to browse the TV guide, schedule shows, watch live TV feeds via timeshift, and stream recordings from your phone, tablet, or remote PC over Tailscale or local LAN. If you use Tailscale, you do not need to open or configure any firewall ports—devices on your Tailnet connect securely both at home and away. If connecting directly over your local Wi-Fi without Tailscale, ensure your local network firewall allows your chosen port."),
             self.web_enable_check
         )
 
@@ -9756,18 +9756,17 @@ class MainWindow(QMainWindow):
             "• <b style='color: #a855f7;'>Touch-Friendly Mobile &amp; Tablet EPG Guide:</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Access your TV Guide from any mobile device, tablet, or browser on your local network or Tailscale mesh.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Features an anchored 2-column channel list, smooth grab-and-drag panning, and genre color pills.<br><br>"
-            "• <b style='color: #a855f7;'>One-Click Remote Recording &amp; Streaming:</b><br>"
+            "• <b style='color: #a855f7;'>One-Click Remote Recording, Live Feeds &amp; Streaming:</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Tap <b>Record</b> on any upcoming broadcast from your phone to schedule it on your home DVR.<br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– Watch live broadcast TV feeds directly in your browser with low-latency timeshift transcoding.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Stream completed recordings in-browser with HTML5 video player and instant RFC 7233 seekable scrubbing, or download recordings.<br><br>"
             "• <b style='color: #a855f7;'>Enabling Web Companion (Settings &gt; Web Companion):</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Check <b>Enable Local / Tailscale Web Companion</b> to start the lightweight internal HTTP server.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Configure a custom port (default: <code>8088</code>) and optional password protection.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Headless CLI launch: <code>kaffeine-dvr --web</code> or <code>kaffeine-dvr --web --port 8080</code>.<br><br>"
-            "• <b style='color: #a855f7;'>Network &amp; Firewall Configuration:</b><br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Tailscale (Recommended):</b> You do <u>not</u> need to open or touch any firewall ports! Tailscale is in Linux's trusted zone by default, allowing secure access from your phones, tablets, and HTPCs both on your home network and away from home.<br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Direct Local LAN (Without Tailscale):</b> If accessing directly over local Ethernet/Wi-Fi using your LAN IP and your firewall blocks incoming traffic, restrict access strictly to your home subnet rather than opening the port to the public:<br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<code>sudo firewall-cmd --add-rich-rule='rule family=\"ipv4\" source address=\"192.168.1.0/24\" port port=\"8088\" protocol=\"tcp\" accept' --permanent &amp;&amp; sudo firewall-cmd --reload</code><br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<i>(Adjust <code>192.168.1.0/24</code> to your home subnet and <code>8088</code> to your configured port).</i>"
+            "• <b style='color: #a855f7;'>Network &amp; Tailscale Configuration:</b><br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Tailscale (Recommended):</b> You do <u>not</u> need to open or touch any firewall ports! Tailscale operates in Linux's trusted zone by default, allowing secure access from your phones, tablets, and remote PCs both on your home network and away from home.<br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Direct Local LAN (Without Tailscale):</b> If connecting directly over your local home Wi-Fi/Ethernet using your computer's LAN IP, ensure your firewall permits local network traffic on your configured port."
         )
         web_text.setWordWrap(True)
         web_text.setStyleSheet(body_style)
@@ -10628,7 +10627,11 @@ class MainWindow(QMainWindow):
             f"<div style='margin-top: 4px; line-height: 135%;'>"
             f"• <b>This Computer:</b> <a href='http://localhost:{port}' style='color: #38bdf8; text-decoration: underline;'>http://localhost:{port}/</a><br>"
             f"• <b>Local LAN:</b> {lan_part}<br>"
-            f"• <b>Tailscale:</b> {ts_part}"
+            f"• <b>Tailscale:</b> {ts_part}<br>"
+            f"<div style='margin-top: 8px; color: #94a3b8; font-size: 11px; line-height: 140%;'>"
+            f"tailscale quickstart guide<br>"
+            f"<a href='https://tailscale.com/docs/how-to/quickstart' style='color: #38bdf8; text-decoration: underline;'>tailscale.com</a>"
+            f"</div>"
             f"</div>"
         )
         self.web_status_lbl.setStyleSheet("color: #cbd5e1; font-size: 12px; margin-top: 2px;")

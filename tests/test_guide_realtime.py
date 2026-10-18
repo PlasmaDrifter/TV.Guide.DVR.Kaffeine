@@ -159,14 +159,14 @@ def test_clock_widget_and_settings(qtbot, isolated_config):
 
     # Test clock size stepper
     assert hasattr(win, "clock_size_spin")
-    assert win.clock_size_spin.value() == 11
+    assert win.clock_size_spin.value() == 18
     win.clock_size_spin.setValue(16)
     assert isolated_config.clock_font_size == 16
     assert "font-size: 16px" in win.clock_label.styleSheet()
 
 
 def test_auto_advance_minute_setting(qtbot, isolated_config):
-    assert isolated_config.guide_auto_advance_minute == 50
+    assert isolated_config.guide_auto_advance_minute == 60
     isolated_config.guide_auto_advance_minute = 45
     assert isolated_config.guide_auto_advance_minute == 45
 
@@ -180,24 +180,19 @@ def test_auto_advance_minute_setting(qtbot, isolated_config):
     win = MainWindow(config_mgr=isolated_config)
     qtbot.addWidget(win)
 
-    assert hasattr(win, "guide_auto_advance_spin")
-    assert win.guide_auto_advance_spin.value() == 50
-    assert win.guide_auto_advance_spin.maximum() == 60
+    assert hasattr(win, "guide_auto_advance_interval_combo")
+    assert win.guide_auto_advance_interval_combo.count() == 3
 
     # Verify HelpBadge tooltip content
     assert hasattr(win, "auto_adv_badge")
-    assert "Set to :60 min to advance right on the hour instead of early" in win.auto_adv_badge._tooltip_text
-    assert "When disabled, the guide will not automatically scroll" in win.auto_adv_badge._tooltip_text
+    assert "When disabled, program statuses still update in real-time, but the grid never automatically scrolls" in win.auto_adv_badge._tooltip_text
+    assert "Every 1 hr, Every 2 hrs, Every 3 hrs" in win.auto_adv_badge._tooltip_text
 
-    # Stepper value change updates config
-    win.guide_auto_advance_spin.setValue(60)
-    assert isolated_config.guide_auto_advance_minute == 60
-
-    # Disabling auto-advance check disables stepper
+    # Disabling auto-advance check disables interval combo
     win.guide_auto_advance_check.setChecked(False)
-    assert win.guide_auto_advance_spin.isEnabled() is False
+    assert win.guide_auto_advance_interval_combo.isEnabled() is False
     win.guide_auto_advance_check.setChecked(True)
-    assert win.guide_auto_advance_spin.isEnabled() is True
+    assert win.guide_auto_advance_interval_combo.isEnabled() is True
 
 
 def test_guide_grid_unhighlight_toggle_and_empty(qtbot, isolated_config):

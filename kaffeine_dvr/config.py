@@ -562,7 +562,7 @@ class ConfigManager:
                     if "tvpassport_stations" not in data:
                         data["tvpassport_stations"] = {}
                     if "lead_time_mins" not in data:
-                        data["lead_time_mins"] = 5
+                        data["lead_time_mins"] = 10
                     if "launch_minimized" not in data:
                         data["launch_minimized"] = True
                     if "launch_mode" not in data:
@@ -572,15 +572,15 @@ class ConfigManager:
                     if "persistent_desktop_notifications" not in data:
                         data["persistent_desktop_notifications"] = False
                     if "notification_lead_time_mins" not in data:
-                        data["notification_lead_time_mins"] = 2
+                        data["notification_lead_time_mins"] = 1
                     if "first_run_completed" not in data:
                         data["first_run_completed"] = False
                     if "auto_cleanup_enabled" not in data:
                         data["auto_cleanup_enabled"] = False
                     if "retention_days" not in data:
-                        data["retention_days"] = 14
+                        data["retention_days"] = 7
                     if "min_free_disk_gb" not in data:
-                        data["min_free_disk_gb"] = 25
+                        data["min_free_disk_gb"] = 50
                     if "custom_recording_folder" not in data:
                         data["custom_recording_folder"] = ""
                     if "custom_kaffeine_path" not in data:
@@ -592,7 +592,7 @@ class ConfigManager:
                     if "auto_buffer_sports" not in data:
                         data["auto_buffer_sports"] = True
                     if "max_history_entries" not in data:
-                        data["max_history_entries"] = 50
+                        data["max_history_entries"] = 40
                     if "auto_check_updates" not in data:
                         data["auto_check_updates"] = False
                     if "update_check_frequency" not in data:
@@ -604,19 +604,19 @@ class ConfigManager:
                     if "playback_player" not in data:
                         data["playback_player"] = "system"
                     if "custom_playback_player_cmd" not in data:
-                        data["custom_playback_player_cmd"] = ""
+                        data["custom_playback_player_cmd"] = "mpv --no-border --window-maximized"
                     if "live_tv_watch_mode" not in data:
-                        data["live_tv_watch_mode"] = "timeshift"
+                        data["live_tv_watch_mode"] = "system"
                     if "timeshift_buffer_seconds" not in data:
                         data["timeshift_buffer_seconds"] = 2
                     if "zero_byte_recording_timeout_secs" not in data:
-                        data["zero_byte_recording_timeout_secs"] = 8
+                        data["zero_byte_recording_timeout_secs"] = 5
                     if "delete_timeshift_on_exit" not in data:
                         data["delete_timeshift_on_exit"] = True
                     if "tuner_count" not in data:
                         data["tuner_count"] = 0
                     if "grid_visible_rows" not in data:
-                        data["grid_visible_rows"] = 9
+                        data["grid_visible_rows"] = 10
                     if "guide_detail_lines" not in data:
                         data["guide_detail_lines"] = 3
                     if "live_same_bg_as_others" not in data:
@@ -626,7 +626,9 @@ class ConfigManager:
                     if "guide_auto_advance" not in data:
                         data["guide_auto_advance"] = True
                     if "guide_auto_advance_minute" not in data:
-                        data["guide_auto_advance_minute"] = 50
+                        data["guide_auto_advance_minute"] = 60
+                    if "guide_auto_advance_interval" not in data:
+                        data["guide_auto_advance_interval"] = 2
                     if "guide_detail_collapsed" not in data:
                         data["guide_detail_collapsed"] = True
                     if "guide_maximized" not in data:
@@ -634,17 +636,17 @@ class ConfigManager:
                     if "guide_show_time_indicator" not in data:
                         data["guide_show_time_indicator"] = True
                     if "time_line_opacity" not in data:
-                        data["time_line_opacity"] = 100
+                        data["time_line_opacity"] = 39
                     if "show_clock" not in data:
                         data["show_clock"] = True
                     if "clock_font_size" not in data:
-                        data["clock_font_size"] = 11
+                        data["clock_font_size"] = 18
                     if "settings_ui_scale" not in data:
                         data["settings_ui_scale"] = 100
                     if "app_theme" not in data:
-                        data["app_theme"] = "midnight"
+                        data["app_theme"] = "warm_sunset"
                     if "theme_preset" not in data:
-                        data["theme_preset"] = "midnight"
+                        data["theme_preset"] = "warm_sunset"
                     if "custom_theme_presets" not in data or not isinstance(data.get("custom_theme_presets"), dict):
                         data["custom_theme_presets"] = {}
                     if "category_colors" not in data or not isinstance(data.get("category_colors"), dict):
@@ -674,13 +676,13 @@ class ConfigManager:
             "rules": [],
             "guide_days_ahead": 14,
             "auto_sync_interval_hours": 6,
-            "watcher_interval_seconds": 180,
-            "lead_time_mins": 5,
+            "watcher_interval_seconds": 210,
+            "lead_time_mins": 10,
             "launch_minimized": True,
             "launch_mode": "tray",
             "enable_desktop_notifications": True,
             "persistent_desktop_notifications": False,
-            "notification_lead_time_mins": 2,
+            "notification_lead_time_mins": 1,
             "country_code": "US",
             "guide_provider": "hybrid",
             "xmltv_path_or_url": "",
@@ -692,46 +694,47 @@ class ConfigManager:
             "tvpassport_stations": {},
             "first_run_completed": False,
             "auto_cleanup_enabled": False,
-            "retention_days": 14,
-            "min_free_disk_gb": 25,
+            "retention_days": 7,
+            "min_free_disk_gb": 50,
             "custom_recording_folder": "",
             "custom_kaffeine_path": "",
             "end_buffer_mins": 0,
             "sports_buffer_mins": 40,
             "auto_buffer_sports": True,
-            "max_history_entries": 50,
+            "max_history_entries": 40,
             "auto_check_updates": False,
             "update_check_frequency": "weekly",
             "last_update_check_timestamp": 0.0,
             "dismissed_update_version": "",
             "playback_player": "system",
-            "custom_playback_player_cmd": "",
-            "live_tv_watch_mode": "timeshift",
+            "custom_playback_player_cmd": "mpv --no-border --window-maximized",
+            "live_tv_watch_mode": "system",
             "timeshift_buffer_seconds": 2,
-            "zero_byte_recording_timeout_secs": 8,
+            "zero_byte_recording_timeout_secs": 5,
             "delete_timeshift_on_exit": True,
             "tuner_count": 0,
-            "grid_visible_rows": 9,
+            "grid_visible_rows": 10,
             "guide_detail_lines": 3,
             "guide_detail_collapsed": True,
             "guide_maximized": False,
             "live_same_bg_as_others": False,
             "hide_live_badge": False,
             "guide_auto_advance": True,
-            "guide_auto_advance_minute": 50,
+            "guide_auto_advance_minute": 60,
+            "guide_auto_advance_interval": 2,
             "guide_show_time_indicator": True,
-            "time_line_opacity": 100,
+            "time_line_opacity": 39,
             "show_clock": True,
-            "clock_font_size": 11,
+            "clock_font_size": 18,
             "settings_ui_scale": 100,
             "guide_single_click_play": True,
             "use_custom_title_bar": True,
-            "app_theme": "midnight",
-            "theme_preset": "midnight",
+            "app_theme": "warm_sunset",
+            "theme_preset": "warm_sunset",
             "custom_theme_presets": {},
             "category_colors": dict(DEFAULT_CATEGORY_COLORS),
             "web_server_enabled": False,
-            "web_server_port": 8088,
+            "web_server_port": 8086,
             "web_server_bind": "0.0.0.0",
             "web_server_password_hash": "",
             "web_server_salt": "",
@@ -1096,7 +1099,7 @@ class ConfigManager:
 
     @property
     def min_free_disk_gb(self) -> int:
-        return self.data.get("min_free_disk_gb", 25)
+        return self.data.get("min_free_disk_gb", 50)
 
     @min_free_disk_gb.setter
     def min_free_disk_gb(self, val: int):
@@ -1474,11 +1477,21 @@ class ConfigManager:
 
     @property
     def guide_auto_advance_minute(self) -> int:
-        return int(self.data.get("guide_auto_advance_minute", 50))
+        return int(self.data.get("guide_auto_advance_minute", 60))
 
     @guide_auto_advance_minute.setter
     def guide_auto_advance_minute(self, val: int):
         self.data["guide_auto_advance_minute"] = max(0, min(60, int(val)))
+        self.save()
+
+    @property
+    def guide_auto_advance_interval(self) -> int:
+        return int(self.data.get("guide_auto_advance_interval", 2))
+
+    @guide_auto_advance_interval.setter
+    def guide_auto_advance_interval(self, val: int):
+        val_int = int(val)
+        self.data["guide_auto_advance_interval"] = val_int if val_int in (1, 2, 3) else 2
         self.save()
 
     @property

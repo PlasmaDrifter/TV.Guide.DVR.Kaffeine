@@ -8,13 +8,14 @@ def test_default_config(isolated_config: ConfigManager):
     assert cfg.auto_buffer_sports is True
     assert cfg.auto_check_updates is False
     assert cfg.update_check_frequency == "weekly"
-    assert cfg.grid_visible_rows == 9
+    assert cfg.grid_visible_rows == 10
     assert cfg.guide_detail_lines == 3
-    assert cfg.lead_time_mins == 5
-    assert cfg.watcher_interval_seconds == 180
-    assert cfg.notification_lead_time_mins == 2
+    assert cfg.lead_time_mins == 10
+    assert cfg.watcher_interval_seconds == 210
+    assert cfg.notification_lead_time_mins == 1
     assert cfg.timeshift_buffer_seconds == 2
-    assert cfg.zero_byte_recording_timeout_secs == 8
+    assert cfg.zero_byte_recording_timeout_secs == 5
+    assert cfg.guide_auto_advance_interval == 2
 
 
 def test_zero_byte_timeout_clamping(isolated_config: ConfigManager):
@@ -63,7 +64,7 @@ def test_reset_to_defaults_preserves_user_data(isolated_config: ConfigManager):
 
     # Change tweakable settings
     cfg.end_buffer_mins = 15
-    cfg.lead_time_mins = 10
+    cfg.lead_time_mins = 20
     cfg.grid_visible_rows = 12
     cfg.set_category_color("sports", "#112233")
 
@@ -78,8 +79,8 @@ def test_reset_to_defaults_preserves_user_data(isolated_config: ConfigManager):
 
     # Verify settings restored to defaults
     assert cfg.end_buffer_mins == 0
-    assert cfg.lead_time_mins == 5
-    assert cfg.grid_visible_rows == 9
+    assert cfg.lead_time_mins == 10
+    assert cfg.grid_visible_rows == 10
     assert cfg.category_colors["sports"] == DEFAULT_CATEGORY_COLORS["sports"]
 
 def test_reset_category_colors(isolated_config: ConfigManager):
@@ -168,6 +169,32 @@ def test_unconfigured_regional_channels_respects_lineup_and_dismissal(isolated_c
     unconfigured_after = cfg.get_unconfigured_regional_channels()
     assert "Ignored Regional" not in unconfigured_after
     assert "Local TV" in unconfigured_after
+
+
+def test_guide_auto_advance_interval_clamping(isolated_config: ConfigManager):
+    cfg = isolated_config
+    # Default is 2 hours
+    assert cfg.guide_auto_advance_interval == 2
+
+    # Set to 1 hour
+    cfg.guide_auto_advance_interval = 1
+    assert cfg.guide_auto_advance_interval == 1
+
+    # Set to 2 hours
+    cfg.guide_auto_advance_interval = 2
+    assert cfg.guide_auto_advance_interval == 2
+
+    # Set to 3 hours
+    cfg.guide_auto_advance_interval = 3
+    assert cfg.guide_auto_advance_interval == 3
+
+    # Any other value defaults back to 2
+    cfg.guide_auto_advance_interval = 5
+    assert cfg.guide_auto_advance_interval == 2
+
+    cfg.guide_auto_advance_interval = 0
+    assert cfg.guide_auto_advance_interval == 2
+
 
 
 

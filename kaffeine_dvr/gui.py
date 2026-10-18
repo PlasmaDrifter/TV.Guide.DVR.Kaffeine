@@ -6584,11 +6584,13 @@ class MainWindow(QMainWindow):
 
         self.jump_now_btn = QPushButton("Jump to Now")
         self.jump_now_btn.setObjectName("guideJumpNowBtn")
+        self.jump_now_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.jump_now_btn.clicked.connect(self.jump_guide_to_now)
         filter_bar.addWidget(self.jump_now_btn)
 
-        self.jump_prime_btn = QPushButton("Prime Time (7 PM)")
+        self.jump_prime_btn = QPushButton("Prime Time")
         self.jump_prime_btn.setObjectName("guideJumpPrimeBtn")
+        self.jump_prime_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.jump_prime_btn.clicked.connect(self.jump_guide_to_primetime)
         filter_bar.addWidget(self.jump_prime_btn)
 
@@ -8259,26 +8261,31 @@ class MainWindow(QMainWindow):
         auto_adv_layout.setContentsMargins(0, 0, 0, 0)
         auto_adv_layout.setSpacing(6)
 
-        self.guide_auto_advance_spin = NumberStepper()
-        self.guide_auto_advance_spin.setRange(0, 60)
-        self.guide_auto_advance_spin.setValue(getattr(self.config_mgr, "guide_auto_advance_minute", 50))
-        self.guide_auto_advance_spin.setPrefix(":")
-        self.guide_auto_advance_spin.setSuffix(" min")
-        self.guide_auto_advance_spin.setFixedWidth(120)
-        self.guide_auto_advance_spin.valueChanged.connect(self._on_guide_auto_advance_min_changed)
-        auto_adv_layout.addWidget(self.guide_auto_advance_spin)
+        self.guide_auto_advance_interval_combo = CenteredComboBox()
+        self.guide_auto_advance_interval_combo.addItem("Every 1 hr", 1)
+        self.guide_auto_advance_interval_combo.addItem("Every 2 hrs", 2)
+        self.guide_auto_advance_interval_combo.addItem("Every 3 hrs", 3)
+        self.guide_auto_advance_interval_combo.setFixedWidth(120)
+        cur_adv_interval = getattr(self.config_mgr, "guide_auto_advance_interval", 1)
+        int_idx = self.guide_auto_advance_interval_combo.findData(cur_adv_interval)
+        self.guide_auto_advance_interval_combo.setCurrentIndex(int_idx if int_idx >= 0 else 0)
+        self.guide_auto_advance_interval_combo.currentIndexChanged.connect(self._on_guide_auto_advance_interval_changed)
+        auto_adv_layout.addWidget(self.guide_auto_advance_interval_combo)
 
         self.guide_auto_advance_check = QCheckBox()
-        self.guide_auto_advance_check.setToolTip("Enable or disable guide auto-advance past the hour")
+        self.guide_auto_advance_check.setToolTip("Enable or disable guide auto-advance")
         self.guide_auto_advance_check.setChecked(getattr(self.config_mgr, "guide_auto_advance", True))
         self.guide_auto_advance_check.toggled.connect(self._on_guide_auto_advance_toggled)
-        self.guide_auto_advance_spin.setEnabled(self.guide_auto_advance_check.isChecked())
+        self.guide_auto_advance_interval_combo.setEnabled(self.guide_auto_advance_check.isChecked())
         auto_adv_layout.addWidget(self.guide_auto_advance_check)
 
         self.auto_adv_badge = HelpBadge(
-            "Automatically scrolls the guide forward to the next hour when reaching the configured minute past the hour. Set to :60 min to advance right on the hour instead of early.\n\n"
-            "When disabled, the guide will not automatically scroll, but all program info and statuses still update in real-time. Use 'Now' (or Home) to jump to the current time.\n\n"
-            "Safeguards prevent scrolling while actively dragging or browsing, and auto-advance only runs when viewing today."
+            "Auto-Advance Timing:\n\n"
+            "• Interval (Every 1 hr, Every 2 hrs, Every 3 hrs):\n"
+            "  Configures how often the guide automatically scrolls forward (every 1, 2, or 3 hours). Selecting 2 or 3 hours keeps the grid anchored on the current multi-hour window longer.\n\n"
+            "• Safeguards:\n"
+            "  Scrolling does not interrupt active dragging or browsing away from the current time block, and auto-advance only applies when viewing today.\n\n"
+            "When disabled, program statuses still update in real-time, but the grid never automatically scrolls. Use 'Now' (Home) to jump anytime."
         )
         auto_adv_layout.addWidget(self.auto_adv_badge)
         auto_adv_layout.addStretch()
@@ -10472,6 +10479,10 @@ class MainWindow(QMainWindow):
             self.config_mgr.guide_detail_lines = self.guide_desc_lines_combo.currentData()
         if hasattr(self, "guide_auto_advance_check"):
             self.config_mgr.guide_auto_advance = self.guide_auto_advance_check.isChecked()
+        if hasattr(self, "guide_auto_advance_interval_combo"):
+            interval = self.guide_auto_advance_interval_combo.currentData()
+            if interval in (1, 2, 3):
+                self.config_mgr.guide_auto_advance_interval = interval
         if hasattr(self, "guide_auto_advance_spin"):
             self.config_mgr.guide_auto_advance_minute = self.guide_auto_advance_spin.value()
         if hasattr(self, "hide_time_line_check"):
@@ -10697,24 +10708,41 @@ class MainWindow(QMainWindow):
         self._apply_guide_zoom()
         if hasattr(self, "_update_zoom_buttons_state"):
             self._update_zoom_buttons_state()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_hide_live_badge_toggled(self, checked: bool):
         self.config_mgr.hide_live_badge = checked
         if hasattr(self, "guide_grid_table"):
             self.guide_grid_table.viewport().update()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_live_same_bg_toggled(self, checked: bool):
         self.config_mgr.live_same_bg_as_others = checked
         if hasattr(self, "guide_grid_table"):
             self.guide_grid_table.viewport().update()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_guide_auto_advance_toggled(self, checked: bool):
         self.config_mgr.guide_auto_advance = checked
         if hasattr(self, "guide_auto_advance_spin"):
             self.guide_auto_advance_spin.setEnabled(checked)
+        if hasattr(self, "guide_auto_advance_interval_combo"):
+            self.guide_auto_advance_interval_combo.setEnabled(checked)
+        self._last_auto_advanced_block = None
+        self.flash_save_indicator("Settings Saved")
 
     def _on_guide_auto_advance_min_changed(self, val: int):
         self.config_mgr.guide_auto_advance_minute = val
+        self._last_auto_advanced_block = None
+        self.flash_save_indicator("Settings Saved")
+
+    def _on_guide_auto_advance_interval_changed(self, idx: int):
+        if hasattr(self, "guide_auto_advance_interval_combo"):
+            interval = self.guide_auto_advance_interval_combo.currentData()
+            if interval in (1, 2, 3):
+                self.config_mgr.guide_auto_advance_interval = interval
+        self._last_auto_advanced_block = None
+        self.flash_save_indicator("Settings Saved")
 
     def _on_single_click_play_toggled(self, checked: bool):
         self.config_mgr.guide_single_click_play = checked
@@ -10726,6 +10754,7 @@ class MainWindow(QMainWindow):
                 self.watch_guide_btn.setVisible(False)
             if hasattr(self, "stop_timeshift_btn") and checked:
                 self.stop_timeshift_btn.setVisible(False)
+        self.flash_save_indicator("Settings Saved")
 
     def _on_hide_time_line_toggled(self, checked: bool):
         self.config_mgr.guide_show_time_indicator = not checked
@@ -10735,6 +10764,7 @@ class MainWindow(QMainWindow):
             self.guide_grid_table.viewport().update()
             if self.guide_grid_table.horizontalHeader():
                 self.guide_grid_table.horizontalHeader().viewport().update()
+        self.flash_save_indicator("Settings Saved")
 
     def _open_time_line_opacity_popup(self):
         app_theme = getattr(self.config_mgr, "app_theme", "midnight") if hasattr(self, "config_mgr") and self.config_mgr else "midnight"
@@ -10754,6 +10784,7 @@ class MainWindow(QMainWindow):
             self.guide_grid_table.viewport().update()
             if self.guide_grid_table.horizontalHeader():
                 self.guide_grid_table.horizontalHeader().viewport().update()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_hide_clock_toggled(self, checked: bool):
         self.config_mgr.show_clock = not checked
@@ -10764,10 +10795,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "clock_size_spin"):
             self.clock_size_spin.setEnabled(not checked)
         self._update_clock_display()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_clock_size_changed(self, val: int):
         self.config_mgr.clock_font_size = val
         self._update_clock_display()
+        self.flash_save_indicator("Settings Saved")
 
     def _on_settings_ui_scale_changed(self, val: int):
         self.config_mgr.settings_ui_scale = int(val)
@@ -11709,27 +11742,43 @@ class MainWindow(QMainWindow):
                             f.setBold(False)
                             it.setFont(f)
 
-        # 3. Auto-Advance at configured minute past the hour (default :50)
+        # 3. Auto-Advance at configured interval (1, 2, or 3 hrs) and minute (default 60 = on the hour)
         auto_adv = getattr(self.config_mgr, "guide_auto_advance", True)
-        adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 50)
-        should_adv = (now.minute == 0) if adv_min == 60 else (now.minute >= adv_min)
-        if auto_adv and is_today and should_adv:
-            last_adv = getattr(self, "_last_auto_advanced_hour", None)
-            cur_key = (now.year, now.month, now.day, now.hour)
+        if auto_adv and is_today:
+            adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 60)
+            interval = getattr(self.config_mgr, "guide_auto_advance_interval", 2)
+            if interval not in (1, 2, 3):
+                interval = 2
+
+            block_start = (now.hour // interval) * interval
+            is_last_hour_of_block = (now.hour % interval) == (interval - 1)
+            # If adv_min < 60, advance early in the last hour of the block once reaching adv_min
+            should_advance_early = (adv_min < 60) and is_last_hour_of_block and (now.minute >= adv_min)
+            target_block_start = (block_start + interval) if should_advance_early else block_start
+
+            cur_key = (now.year, now.month, now.day, target_block_start)
+            last_adv = getattr(self, "_last_auto_advanced_block", None)
+
             if last_adv != cur_key:
                 # Check user interaction guards:
                 is_dragging = getattr(self, "grid_pan_filter", None) and getattr(self.grid_pan_filter, "_dragging", False)
                 has_modal = QApplication.activeModalWidget() is not None
                 if not is_dragging and not has_modal:
                     if self._is_grid_view_active():
-                        # Browsing safeguard: only advance if scroll is near current hour slot
-                        col_width = self.guide_grid_table.horizontalHeader().defaultSectionSize()
-                        cur_hour_slot = min(47, now.hour * 2)
-                        expected_x = self.guide_grid_table.horizontalHeader().sectionPosition(cur_hour_slot)
+                        # Browsing safeguard: only advance if the user's view is near the current
+                        # active block or the block that just finished (i.e. not browsing far away).
+                        col_width = self.guide_grid_table.horizontalHeader().defaultSectionSize() or 200
+                        prev_block_start = max(0, target_block_start - interval)
+                        prev_x = self.guide_grid_table.horizontalHeader().sectionPosition(min(47, prev_block_start * 2))
+                        target_x = self.guide_grid_table.horizontalHeader().sectionPosition(min(47, target_block_start * 2))
                         cur_x = self.guide_grid_table.horizontalScrollBar().value()
-                        if abs(cur_x - expected_x) <= col_width * 2:
+
+                        min_allowed_x = max(0, prev_x - col_width * 2)
+                        max_allowed_x = target_x + col_width * 2
+
+                        if min_allowed_x <= cur_x <= max_allowed_x or last_adv is None:
                             self.jump_guide_to_now()
-                            self._last_auto_advanced_hour = cur_key
+                            self._last_auto_advanced_block = cur_key
                     else:
                         cur_top_row = self.guide_table.rowAt(0)
                         programs = getattr(self, "current_guide_items", None) or []
@@ -11741,7 +11790,7 @@ class MainWindow(QMainWindow):
                                 break
                         if first_act >= 0 and abs(cur_top_row - first_act) <= 5:
                             self._scroll_list_to_first_active()
-                            self._last_auto_advanced_hour = cur_key
+                            self._last_auto_advanced_block = cur_key
 
     def refresh_date_dropdown(self, reset_to_default: bool = False):
         """Refreshes the Date dropdown when a new calendar day begins or on app startup."""
@@ -12541,16 +12590,24 @@ class MainWindow(QMainWindow):
                     self.guide_date_combo.setCurrentIndex(today_idx)
                     return
 
+        now = datetime.now()
         if self._is_grid_view_active():
-            now = datetime.now()
-            # Align the left edge of the grid to the current hour (e.g. 10:00 AM at 10:15).
-            # Advance to the next hour when reaching the configured minute past the hour (default :50).
-            adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 50) if hasattr(self, "config_mgr") else 50
-            effective_hour = (now.hour + 1) if (adv_min < 60 and now.minute >= adv_min) else now.hour
+            # Align the left edge of the grid to the current hour/interval block (e.g. 10:00 AM).
+            # Advance to the next block when reaching the configured minute past the hour (default :50).
+            adv_min = getattr(self.config_mgr, "guide_auto_advance_minute", 60) if hasattr(self, "config_mgr") else 60
+            interval = getattr(self.config_mgr, "guide_auto_advance_interval", 2) if hasattr(self, "config_mgr") else 2
+            if interval not in (1, 2, 3):
+                interval = 2
+            block_start = (now.hour // interval) * interval
+            is_last_hour_of_block = (now.hour % interval) == (interval - 1)
+            should_advance_early = (adv_min < 60) and is_last_hour_of_block and (now.minute >= adv_min)
+            effective_hour = (block_start + interval) if should_advance_early else block_start
             target_slot = min(47, effective_hour * 2)
             self._scroll_grid_to_slot(target_slot, center=False, animate=animate)
+            self._last_auto_advanced_block = (now.year, now.month, now.day, effective_hour)
         else:
             self._scroll_list_to_first_active()
+            self._last_auto_advanced_block = (now.year, now.month, now.day, now.hour)
 
     def jump_guide_to_start(self, *args, animate: bool = True, **kwargs):
         if getattr(self, "_is_closed", False):

@@ -64,7 +64,7 @@ def test_main_window_reset_defaults_ui(qtbot, isolated_config):
     win._refresh_all_settings_ui()
 
     assert win.end_buffer_spin.value() == 0
-    assert win.grid_rows_spin.value() == 9
+    assert win.grid_rows_spin.value() == 10
 
 
 def test_program_tile_delegate_paint(qtbot, isolated_config):
@@ -211,7 +211,7 @@ def test_grid_guide_options_120px_width(qtbot, isolated_config):
 
     assert win.grid_rows_spin.width() == 120
     assert win.guide_desc_lines_combo.width() == 120
-    assert win.guide_auto_advance_spin.width() == 120
+    assert win.guide_auto_advance_interval_combo.width() == 120
     assert win.clock_size_spin.width() == 120
 
 
@@ -224,12 +224,12 @@ def test_time_line_disable_toggle_and_opacity_popup_state(qtbot, isolated_config
     assert hasattr(win, "hide_time_line_check")
     assert hasattr(win, "time_line_opacity_btn")
 
-    # By default, time line is enabled and opacity is 100%
+    # By default, time line is enabled and opacity is 39%
     assert win.config_mgr.guide_show_time_indicator is True
-    assert win.config_mgr.time_line_opacity == 100
+    assert win.config_mgr.time_line_opacity == 39
     assert win.hide_time_line_check.isChecked() is False
     assert win.time_line_opacity_btn.isEnabled() is True
-    assert win.time_line_opacity_btn.text() == "Opacity: 100%"
+    assert win.time_line_opacity_btn.text() == "Opacity: 39%"
 
     # Disable time line from hide_time_line_check (in Column 2)
     win.hide_time_line_check.setChecked(True)
@@ -244,7 +244,7 @@ def test_time_line_disable_toggle_and_opacity_popup_state(qtbot, isolated_config
     # Open popup slider
     win._open_time_line_opacity_popup()
     assert OpacitySliderPopup._active_popup is not None
-    assert OpacitySliderPopup._active_popup.slider.value() == 100
+    assert OpacitySliderPopup._active_popup.slider.value() == 39
 
     # Change value via slider
     OpacitySliderPopup._active_popup.slider.setValue(45)
@@ -1335,6 +1335,134 @@ def test_service_logs_dialog_width_and_highlighter(qtbot):
     dlg.clear_btn.click()
     assert dlg.log_view.toPlainText() == ""
     assert "cleared" in dlg.line_count_lbl.text()
+
+
+def test_jump_guide_to_now_intervals(qtbot, isolated_config, monkeypatch):
+    from datetime import datetime
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    scrolled_slots = []
+    def mock_scroll(slot, **kw):
+        scrolled_slots.append(slot)
+        col_w = win.guide_grid_table.horizontalHeader().defaultSectionSize() or 205
+        win.guide_grid_table.horizontalScrollBar().setValue(slot * col_w)
+
+    monkeypatch.setattr(win, "_scroll_grid_to_slot", mock_scroll)
+
+    # Case 1: Interval 1 hr, Minute 50
+    win.config_mgr.guide_auto_advance_interval = 1
+    win.config_mgr.guide_auto_advance_minute = 50
+
+    # 10:15 -> stays at 10:00 (slot 20)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 15))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]
+
+    # 10:50 -> advances to 11:00 (slot 22)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 50))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [22]
+
+    # Case 2: Interval 2 hrs, Minute 50
+    win.config_mgr.guide_auto_advance_interval = 2
+
+    # 10:15 -> block 10:00-12:00 -> slot 20
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 15))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]
+
+    # 10:50 -> first hour of 2-hr block -> does NOT advance early, stays at 10:00 (slot 20)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 50))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]
+
+    # 11:15 -> second hour of 2-hr block before :50 -> stays at 10:00 (slot 20)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 15))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]
+
+    # 11:50 -> last hour of 2-hr block at :50 -> advances to 12:00 (slot 24)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 50))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [24]
+
+    # Case 3: Interval 3 hrs, Minute 50
+    win.config_mgr.guide_auto_advance_interval = 3
+
+    # 10:15 -> block 9:00-12:00 -> slot 18 (9:00 AM)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 15))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [18]
+
+    # 11:50 -> last hour of 3-hr block at :50 -> advances to 12:00 (slot 24)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 50))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [24]
+
+    # Case 4: On-the-hour (Minute 60) for 1, 2, and 3 hour intervals
+    win.config_mgr.guide_auto_advance_minute = 60
+
+    # 1 hr interval: stays on hour until exact next hour
+    win.config_mgr.guide_auto_advance_interval = 1
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 10, 59))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]  # Still 10:00
+
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 0))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [22]  # Advances to 11:00
+
+    # 2 hr interval: stays on 10:00 across entire 2 hours (10:00 to 11:59)
+    win.config_mgr.guide_auto_advance_interval = 2
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 30))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]  # Still 10:00
+
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 59))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [20]  # Still 10:00
+
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 12, 0))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [24]  # Advances to 12:00
+
+    # 3 hr interval: stays on 9:00 across entire 3 hours (9:00 to 11:59)
+    win.config_mgr.guide_auto_advance_interval = 3
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 11, 45))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [18]  # Still 9:00
+
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 12, 0))}))
+    scrolled_slots.clear()
+    win.jump_guide_to_now(animate=False)
+    assert scrolled_slots == [24]  # Advances to 12:00
+
+    # Realtime auto-advance trigger:
+    # Set last advanced block to 10:00 AM (block 10), clock now 12:05 PM (block 12)
+    win.config_mgr.guide_auto_advance_interval = 2
+    win._last_auto_advanced_block = (2026, 10, 18, 10)
+    monkeypatch.setattr("kaffeine_dvr.gui.datetime", type("MockDT", (), {"now": staticmethod(lambda: datetime(2026, 10, 18, 12, 5))}))
+    scrolled_slots.clear()
+    win._update_guide_realtime()
+    assert scrolled_slots == [24]  # Auto-advanced to 12:00 PM!
+    assert win._last_auto_advanced_block == (2026, 10, 18, 12)
+
+
 
 
 

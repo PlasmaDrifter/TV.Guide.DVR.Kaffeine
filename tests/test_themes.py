@@ -69,8 +69,8 @@ def test_build_app_stylesheet():
 
 def test_config_theme_presets(isolated_config):
     cfg = isolated_config
-    assert cfg.theme_preset == "midnight"
-    assert cfg.app_theme == "midnight"
+    assert cfg.theme_preset == "warm_sunset"
+    assert cfg.app_theme == "warm_sunset"
 
     # Apply cyberpunk preset to guide
     cfg.apply_theme_preset("cyberpunk")
@@ -79,7 +79,7 @@ def test_config_theme_presets(isolated_config):
     assert cfg.category_colors["news"] == THEME_PRESETS["cyberpunk"]["colors"]["news"]
     assert cfg.category_colors["movies"] == THEME_PRESETS["cyberpunk"]["colors"]["movies"]
     # App theme remains untouched
-    assert cfg.app_theme == "midnight"
+    assert cfg.app_theme == "warm_sunset"
 
     # Apply app theme
     cfg.apply_app_theme("oled_black")
@@ -112,7 +112,7 @@ def test_gui_dual_theme_switching(qapp, isolated_config):
     # Test independent config application
     cfg.apply_app_theme("oled_black")
     assert cfg.app_theme == "oled_black"
-    assert cfg.theme_preset == "midnight"
+    assert cfg.theme_preset == "warm_sunset"
 
     cfg.apply_theme_preset("cyberpunk")
     assert cfg.theme_preset == "cyberpunk"

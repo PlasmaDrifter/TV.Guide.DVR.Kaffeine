@@ -93,6 +93,10 @@ def get_pip_flags() -> list:
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
     "0.9.0": (
         "## What's Changed in v0.9.0\n\n"
+        "• **Guide Auto-Advance Intervals (1, 2, and 3 Hours)**: Added 1, 2, and 3-hour interval options for Guide Auto-Advance on the hour. Re-engineered block-boundary tracking and dynamic viewport range safeguards so the guide stays anchored to the current multi-hour block and reliably advances when a new interval begins.\n"
+        "• **Grid Guide Options Layout & Instant Jump Highlights**: Restored even 1:1:1 column spacing in Grid Guide Options. Removed lingering focus rings from Jump to Now and Prime Time buttons for clean instant click feedback.\n"
+        "• **Settings Auto-Save & Visual Feedback**: Audited and confirmed immediate auto-save and confirmation feedback ('Settings Saved') across all General settings.\n"
+        "• **Refined Out-of-the-Box Defaults**: Established optimized defaults for new installations: 10-minute lead time, 210s watcher interval, 50 GB free disk space, 2s timeshift buffer, 2-hour auto-advance on the hour, and Warm Amber / Sunset theme.\n"
         "• **Expanded Custom Themes (Up to 6 Presets)**: Increased custom grid theme preset storage capacity from 3 to 6 saved presets with an intuitive 2-column compact layout.\n"
         "• **Centered Custom Anchor Pill**: Permanently centered the 'Custom (save up to 6)' anchor pill across the custom grid section regardless of saved preset count.\n"
         "• **Full 4x2 Grid Theme Parity**: Completed the 8th slot in both Guide Grid Themes and Application Themes with cross-populated matching presets: added Deep Charcoal to Guide Grid Themes and Emerald Forest to Application Themes.\n"

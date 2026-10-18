@@ -77,6 +77,8 @@ Kaffeine is a powerful digital TV viewer for KDE and Linux desktop environments,
 
 The AppImage is completely self-contained. **No Python, PyQt6, or package installation is needed** (all libraries and dependencies are bundled inside).
 
+> **Prerequisite:** Kaffeine (`kaffeine`) must be installed on your system. While the AppImage bundles Python and all GUI dependencies, it interacts directly with your host Kaffeine installation to manage tuners, scan channels, and record broadcasts.
+
 - **Latest Available AppImage**: [Download TV.Guide.DVR.Kaffeine v0.9.0 AppImage](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases/tag/v0.9.0)
 - **All Releases & Source Code**: [View All GitHub Releases](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases)
 
@@ -95,9 +97,9 @@ chmod +x TV.Guide.DVR.Kaffeine-*.AppImage
 
 Use this method if you prefer installing directly into your user Python environment and registering systemd user services.
 
-#### Prerequisites (For Source Installation Only)
-- Python 3.9 or newer with `pip`
+#### Prerequisites
 - Kaffeine (`kaffeine`) installed on your system
+- Python 3.9 or newer with `pip`
 - Optional desktop tools: `notify-send` (for notifications), `kdotool` or `xdotool` (for window minimization)
 
 *(Note: Python dependencies such as PyQt6 are downloaded and installed automatically by `install.sh`)*

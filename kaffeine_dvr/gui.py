@@ -10951,6 +10951,8 @@ class MainWindow(QMainWindow):
             item = self.guide_theme_grid.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
+                w.setParent(None)
                 w.deleteLater()
 
         if hasattr(self, "guide_custom_grid"):
@@ -10958,6 +10960,8 @@ class MainWindow(QMainWindow):
                 item = self.guide_custom_grid.takeAt(0)
                 w = item.widget()
                 if w:
+                    w.hide()
+                    w.setParent(None)
                     w.deleteLater()
 
         self._guide_theme_chips.clear()
@@ -10978,26 +10982,29 @@ class MainWindow(QMainWindow):
             self.guide_theme_grid.addWidget(chip, slot_idx // num_cols, slot_idx % num_cols, Qt.AlignmentFlag.AlignLeft)
             self._guide_theme_chips[p_key] = chip
 
-        # 2. Custom (save up to 3) pill permanently anchors slot 0 (0, 0)
-        custom_chip_w = 175
+        # 2. Custom (save up to 6) pill permanently anchors row 0, centered across columns 0 and 1
+        custom_anchor_w = 175
+        custom_saved_w = 100
         target_custom_grid = self.guide_custom_grid if hasattr(self, "guide_custom_grid") else self.guide_theme_grid
-        self.theme_preset_combo.addItem("Custom (save up to 3)", "custom")
+        self.theme_preset_combo.addItem("Custom (save up to 6)", "custom")
         cur_colors = self.config_mgr.category_colors if self.config_mgr else DEFAULT_CATEGORY_COLORS
         custom_dot = cur_colors.get("highlight", cur_colors.get("sports", "#ffa028"))
-        custom_chip = ThemeChip("custom", "Custom (save up to 3)", custom_dot, parent=self, fixed_width=custom_chip_w)
+        custom_chip = ThemeChip("custom", "Custom (save up to 6)", custom_dot, parent=self, fixed_width=custom_anchor_w)
         custom_chip.chip_clicked.connect(self.select_guide_theme)
-        target_custom_grid.addWidget(custom_chip, 0, 0, Qt.AlignmentFlag.AlignLeft)
+        target_custom_grid.addWidget(custom_chip, 0, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
         self._guide_theme_chips["custom"] = custom_chip
 
-        # 3. Saved custom presets (max 3) stacked directly vertically under Custom
+        # 3. Saved custom presets (max 6) arranged side-by-side in 2 columns under Custom
         custom_presets = self.config_mgr.custom_theme_presets if self.config_mgr else {}
-        custom_sorted = sorted(custom_presets.items(), key=lambda x: x[1]["name"].lower())[:3]
-        for row_idx, (p_key, p_info) in enumerate(custom_sorted, start=1):
+        custom_sorted = sorted(custom_presets.items(), key=lambda x: x[1]["name"].lower())[:6]
+        for idx, (p_key, p_info) in enumerate(custom_sorted):
+            row_idx = 1 + (idx // 2)
+            col_idx = idx % 2
             self.theme_preset_combo.addItem(p_info["name"], p_key)
             dot_color = p_info.get("accent_color", p_info["colors"].get("highlight", "#38bdf8"))
-            chip = ThemeChip(p_key, p_info["name"], dot_color, parent=self, fixed_width=custom_chip_w)
+            chip = ThemeChip(p_key, p_info["name"], dot_color, parent=self, fixed_width=custom_saved_w)
             chip.chip_clicked.connect(self.select_guide_theme)
-            target_custom_grid.addWidget(chip, row_idx, 0, Qt.AlignmentFlag.AlignLeft)
+            target_custom_grid.addWidget(chip, row_idx, col_idx, Qt.AlignmentFlag.AlignCenter)
             self._guide_theme_chips[p_key] = chip
 
         p_idx = self.theme_preset_combo.findData(cur_preset)
@@ -11100,12 +11107,12 @@ class MainWindow(QMainWindow):
             self._sync_guide_theme_chips()
 
     def _save_current_theme_preset(self):
-        """Prompt user for a preset name and save the current guide grid category colors (max 3 custom presets)."""
+        """Prompt user for a preset name and save the current guide grid category colors (max 6 custom presets)."""
         custom_presets = getattr(self.config_mgr, "custom_theme_presets", {})
         overwrite_key = None
         default_name = ""
 
-        if len(custom_presets) >= 3:
+        if len(custom_presets) >= 6:
             theme_names = [info["name"] for k, info in custom_presets.items()]
             keys = list(custom_presets.keys())
             cur_preset = getattr(self.config_mgr, "theme_preset", "")
@@ -11113,8 +11120,8 @@ class MainWindow(QMainWindow):
 
             item, ok = QInputDialog.getItem(
                 self,
-                "Custom Theme Limit Reached (3/3)",
-                "You have reached the maximum limit of 3 saved custom themes.\n"
+                "Custom Theme Limit Reached (6/6)",
+                "You have reached the maximum limit of 6 saved custom themes.\n"
                 "Select an existing theme to replace with your current colors, or Cancel:",
                 theme_names,
                 current_idx,

@@ -1297,8 +1297,8 @@ class ConfigManager:
         if overwrite_key and overwrite_key in presets:
             if overwrite_key != preset_key:
                 del presets[overwrite_key]
-        elif preset_key not in presets and len(presets) >= 3:
-            raise ValueError("Maximum limit of 3 custom theme presets reached.")
+        elif preset_key not in presets and len(presets) >= 6:
+            raise ValueError("Maximum limit of 6 custom theme presets reached.")
 
         presets[preset_key] = {
             "name": clean_name,

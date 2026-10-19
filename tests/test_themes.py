@@ -324,3 +324,47 @@ def test_single_click_help_badge_and_abilities(qtbot, isolated_config):
     assert "description" in tooltip.lower()
     assert "Right-Click" in tooltip
 
+
+def test_custom_theme_trash_buttons(qtbot, isolated_config, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox, QPushButton
+    from kaffeine_dvr.gui import MainWindow
+
+    # Configure custom presets
+    isolated_config.save_custom_theme_preset("Custom Alpha")
+    k_alpha = [k for k, v in isolated_config.custom_theme_presets.items() if v["name"] == "Custom Alpha"][0]
+    isolated_config.save_custom_theme_preset("Custom Beta")
+    k_beta = [k for k, v in isolated_config.custom_theme_presets.items() if v["name"] == "Custom Beta"][0]
+
+    # Set active theme to Custom Beta
+    isolated_config.theme_preset = k_beta
+
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    # 1. Verify delete_theme_preset_btn is removed from header
+    assert not hasattr(win, "delete_theme_preset_btn")
+
+    # 2. Verify trash buttons exist next to each custom preset in guide_custom_grid
+    trash_btns = win.findChildren(QPushButton, "customThemeTrashBtn")
+    assert len(trash_btns) == 2
+
+    # 3. Simulate clicking trash button for Custom Alpha without enabling it first
+    # Auto-accept QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+
+    # Delete Custom Alpha directly
+    win._delete_custom_theme_preset(k_alpha)
+
+    # Verify Custom Alpha is deleted from config
+    assert k_alpha not in isolated_config.custom_theme_presets
+    # Verify Custom Beta is still present and remains the active theme
+    assert k_beta in isolated_config.custom_theme_presets
+    assert isolated_config.theme_preset == k_beta
+
+    # 4. Now delete the active theme Custom Beta
+    win._delete_custom_theme_preset(k_beta)
+    assert k_beta not in isolated_config.custom_theme_presets
+    # Reverts to midnight because it was active
+    assert isolated_config.theme_preset == "midnight"
+
+

@@ -3241,7 +3241,11 @@ class ThemeChip(QPushButton):
         self.setIcon(QIcon(pix))
         self.setIconSize(QSize(10, 10))
 
-        self.setText(f"  {self.short_name}")
+        fm = self.fontMetrics()
+        avail_w = max(30, self.fixed_width - 24)
+        display_lbl = fm.elidedText(self.short_name, Qt.TextElideMode.ElideRight, avail_w)
+        self.setText(f" {display_lbl}")
+        self.setToolTip(self.display_name)
         if self._is_selected:
             self.setStyleSheet("""
                 QPushButton {
@@ -8521,16 +8525,6 @@ class MainWindow(QMainWindow):
         self.save_theme_preset_btn.clicked.connect(self._save_current_theme_preset)
         hdr_custom_row.addWidget(self.save_theme_preset_btn)
 
-        self.delete_theme_preset_btn = QPushButton()
-        self.delete_theme_preset_btn.setObjectName("deleteThemePresetBtn")
-        self.delete_theme_preset_btn.setFixedSize(btn_size)
-        self.delete_theme_preset_btn.setIcon(self._create_delete_theme_icon())
-        self.delete_theme_preset_btn.setIconSize(icon_size)
-        self.delete_theme_preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.delete_theme_preset_btn.setToolTip("Delete Theme (Delete selected custom theme preset)")
-        self.delete_theme_preset_btn.clicked.connect(self._delete_current_theme_preset)
-        hdr_custom_row.addWidget(self.delete_theme_preset_btn)
-
         self.reset_cat_colors_btn = QPushButton()
         self.reset_cat_colors_btn.setObjectName("resetCatColorsBtn")
         self.reset_cat_colors_btn.setFixedSize(btn_size)
@@ -11032,8 +11026,6 @@ class MainWindow(QMainWindow):
                 self.guide_maximize_btn.setIcon(self._create_guide_maximize_icon(tokens.get("accent_primary")))
         if hasattr(self, "save_theme_preset_btn") and self.save_theme_preset_btn:
             self.save_theme_preset_btn.setIcon(self._create_save_theme_icon(tokens.get("accent_hover")))
-        if hasattr(self, "delete_theme_preset_btn") and self.delete_theme_preset_btn:
-            self.delete_theme_preset_btn.setIcon(self._create_delete_theme_icon())
         if hasattr(self, "reset_cat_colors_btn") and self.reset_cat_colors_btn:
             self.reset_cat_colors_btn.setIcon(self._create_defaults_theme_icon(tokens.get("accent_primary")))
 
@@ -11148,8 +11140,11 @@ class MainWindow(QMainWindow):
             self._guide_theme_chips[p_key] = chip
 
         # 2. Custom (save up to 6) pill permanently anchors row 0, centered across columns 0 and 1
-        custom_anchor_w = 175
+        custom_anchor_w = 200
         custom_saved_w = 100
+        del_btn_w = 20
+        del_spacing = 3
+        cell_w = custom_saved_w + del_spacing + del_btn_w
         target_custom_grid = self.guide_custom_grid if hasattr(self, "guide_custom_grid") else self.guide_theme_grid
         self.theme_preset_combo.addItem("Custom (save up to 6)", "custom")
         cur_colors = self.config_mgr.category_colors if self.config_mgr else DEFAULT_CATEGORY_COLORS
@@ -11159,7 +11154,7 @@ class MainWindow(QMainWindow):
         target_custom_grid.addWidget(custom_chip, 0, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
         self._guide_theme_chips["custom"] = custom_chip
 
-        # 3. Saved custom presets (max 6) arranged side-by-side in 2 columns under Custom
+        # 3. Saved custom presets (max 6) arranged side-by-side in 2 columns under Custom with dedicated delete trash icon
         custom_presets = self.config_mgr.custom_theme_presets if self.config_mgr else {}
         custom_sorted = sorted(custom_presets.items(), key=lambda x: x[1]["name"].lower())[:6]
         for idx, (p_key, p_info) in enumerate(custom_sorted):
@@ -11167,18 +11162,53 @@ class MainWindow(QMainWindow):
             col_idx = idx % 2
             self.theme_preset_combo.addItem(p_info["name"], p_key)
             dot_color = p_info.get("accent_color", p_info["colors"].get("highlight", "#38bdf8"))
+
+            item_widget = QWidget()
+            item_widget.setFixedSize(cell_w, 28)
+            item_layout = QHBoxLayout(item_widget)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+            item_layout.setSpacing(del_spacing)
+
             chip = ThemeChip(p_key, p_info["name"], dot_color, parent=self, fixed_width=custom_saved_w)
             chip.chip_clicked.connect(self.select_guide_theme)
-            target_custom_grid.addWidget(chip, row_idx, col_idx, Qt.AlignmentFlag.AlignCenter)
+            item_layout.addWidget(chip)
+
+            del_btn = QPushButton()
+            del_btn.setObjectName("customThemeTrashBtn")
+            del_btn.setFixedSize(del_btn_w, 24)
+            del_btn.setIcon(self._create_delete_theme_icon())
+            del_btn.setIconSize(QSize(13, 13))
+            del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            del_btn.setToolTip(f"Delete Theme '{p_info['name']}'")
+            del_btn.setStyleSheet("""
+                QPushButton#customThemeTrashBtn {
+                    background-color: transparent;
+                    border: 1px solid transparent;
+                    border-radius: 4px;
+                    padding: 0px;
+                }
+                QPushButton#customThemeTrashBtn:hover {
+                    background-color: rgba(239, 68, 68, 0.2);
+                    border: 1px solid rgba(239, 68, 68, 0.5);
+                }
+                QPushButton#customThemeTrashBtn:pressed {
+                    background-color: rgba(239, 68, 68, 0.35);
+                    border: 1px solid #ef4444;
+                }
+            """)
+            del_btn.clicked.connect(lambda checked=False, k=p_key: self._delete_custom_theme_preset(k))
+            item_layout.addWidget(del_btn)
+
+            target_custom_grid.addWidget(item_widget, row_idx, col_idx, Qt.AlignmentFlag.AlignCenter)
             self._guide_theme_chips[p_key] = chip
 
         # Enforce column widths and spacers so columns 0 and 1 remain identical width, keeping Custom permanently centered
         if hasattr(target_custom_grid, "setColumnMinimumWidth"):
-            target_custom_grid.setColumnMinimumWidth(0, custom_saved_w)
-            target_custom_grid.setColumnMinimumWidth(1, custom_saved_w)
+            target_custom_grid.setColumnMinimumWidth(0, cell_w)
+            target_custom_grid.setColumnMinimumWidth(1, cell_w)
         if hasattr(target_custom_grid, "addItem"):
-            target_custom_grid.addItem(QSpacerItem(custom_saved_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 0)
-            target_custom_grid.addItem(QSpacerItem(custom_saved_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 1)
+            target_custom_grid.addItem(QSpacerItem(cell_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 0)
+            target_custom_grid.addItem(QSpacerItem(cell_w, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum), 1, 1)
 
         p_idx = self.theme_preset_combo.findData(cur_preset)
         self.theme_preset_combo.setCurrentIndex(max(p_idx, 0))
@@ -11210,11 +11240,6 @@ class MainWindow(QMainWindow):
         if "custom" in self._guide_theme_chips and self.config_mgr:
             cur_colors = self.config_mgr.category_colors
             self._guide_theme_chips["custom"].set_dot_color(cur_colors.get("highlight", cur_colors.get("sports", "#ffa028")))
-
-        # Enable Delete Theme button only if currently selected preset is a user custom preset
-        if hasattr(self, "delete_theme_preset_btn") and self.config_mgr:
-            is_custom_saved = cur_preset in self.config_mgr.custom_theme_presets
-            self.delete_theme_preset_btn.setEnabled(is_custom_saved)
 
     def _apply_guide_theme_preset(self, preset_key: str):
         if not preset_key or preset_key == "custom":
@@ -11326,14 +11351,14 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "Theme Error", str(e))
 
-    def _delete_current_theme_preset(self):
-        """Delete the currently selected custom theme preset."""
-        cur_preset = self.config_mgr.theme_preset
-        custom_presets = self.config_mgr.custom_theme_presets
-        if cur_preset not in custom_presets:
+    def _delete_custom_theme_preset(self, preset_key: Optional[str] = None):
+        """Delete a custom theme preset directly without having to enable it first."""
+        target_key = preset_key or (self.config_mgr.theme_preset if self.config_mgr else "")
+        custom_presets = self.config_mgr.custom_theme_presets if self.config_mgr else {}
+        if target_key not in custom_presets:
             return
 
-        preset_name = custom_presets[cur_preset]["name"]
+        preset_name = custom_presets[target_key]["name"]
         reply = QMessageBox.question(
             self,
             "Delete Theme Preset",
@@ -11342,10 +11367,18 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.config_mgr.delete_custom_theme_preset(cur_preset)
+            self.config_mgr.delete_custom_theme_preset(target_key)
             self._populate_theme_preset_combo()
-            self.select_guide_theme("midnight")
+            cur_preset = getattr(self.config_mgr, "theme_preset", "")
+            if cur_preset == target_key:
+                self.select_guide_theme("midnight")
+            else:
+                self._sync_guide_theme_chips()
             self.flash_save_indicator(f"Deleted Theme Preset: {preset_name}")
+
+    def _delete_current_theme_preset(self):
+        """Delete the currently selected custom theme preset (backwards compatibility)."""
+        self._delete_custom_theme_preset()
 
     def _choose_category_color(self, category_key: str, category_label: str):
         """Open compact custom color picker to select a custom color for a guide category."""

@@ -504,6 +504,8 @@ class Watcher:
 
     def check_and_dispatch(self, notify: bool = True) -> int:
         self.reap_children()
+        if hasattr(self.config_mgr, "reload_if_changed"):
+            self.config_mgr.reload_if_changed()
         # Recover any active recordings interrupted mid-broadcast by a reboot or crash
         self.recover_interrupted_recordings()
         # Resolve any back-to-back buffer conflicts across different channels before arming

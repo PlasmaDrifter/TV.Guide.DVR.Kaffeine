@@ -11474,6 +11474,7 @@ class MainWindow(QMainWindow):
             )
             self.update_storage_status_ui()
             self.refresh_recordings()
+            self.refresh_history(force=True)
 
             cnt = res.get("deleted_count", 0)
             freed = res.get("freed_gb", 0.0)

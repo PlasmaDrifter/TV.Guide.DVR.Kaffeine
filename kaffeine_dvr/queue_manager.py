@@ -1161,6 +1161,18 @@ class QueueManager:
                             (rec.get("title", ""), rec.get("channel", ""), rec.get("start_iso", ""))
                         )
                         if not cur.fetchone():
+                            fpath = rec.get("file_path")
+                            if not fpath:
+                                try:
+                                    from .storage_manager import StorageManager
+                                    sm = StorageManager()
+                                    resolved = sm.find_active_or_recent_recording_file(rec.get("title", ""))
+                                    if resolved:
+                                        fpath = str(resolved)
+                                        cur.execute("UPDATE recording_queue SET file_path = ? WHERE id = ?", (fpath, qid))
+                                except Exception:
+                                    pass
+
                             cur.execute("""
                                 INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -1171,7 +1183,7 @@ class QueueManager:
                                 rec.get("duration_iso", ""),
                                 rec.get("start_time_local", ""),
                                 now.isoformat(),
-                                rec.get("file_path"),
+                                fpath,
                                 rec.get("protected", 0)
                             ))
                             archived_count += 1
@@ -1192,7 +1204,7 @@ class QueueManager:
         conn.close()
 
         # Prune history to max configured limit
-        if archived_count > 0:
+        if max_history > 0:
             self.prune_history(max_history)
 
         return {"started": started_count, "archived": archived_count, "purged": purged_count}
@@ -1258,11 +1270,55 @@ class QueueManager:
 
     def mark_file_purged(self, file_path_str: str):
         """
-        When a recording file is deleted/purged, removes its listing from the schedule.
+        When a recording file is deleted/purged, removes its listing from the schedule and history.
         """
+        if not file_path_str:
+            return
         conn = self._get_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM recording_queue WHERE file_path = ?", (file_path_str,))
+        fname = Path(file_path_str).name
+        stem = Path(file_path_str).stem
+
+        # 1. recording_history: delete unprotected rows matching exact file_path, basename, or path pattern
+        cur.execute("""
+            DELETE FROM recording_history
+            WHERE protected = 0
+              AND (file_path = ? OR file_path = ? OR file_path LIKE ?)
+        """, (file_path_str, fname, f"%/{fname}"))
+
+        # If no row deleted by file_path, match by title / stem on oldest entry
+        if cur.rowcount == 0:
+            cur.execute("""
+                SELECT id FROM recording_history
+                WHERE protected = 0
+                  AND (title = ? OR ? LIKE (title || '%'))
+                ORDER BY id ASC
+                LIMIT 1
+            """, (stem, stem))
+            row = cur.fetchone()
+            if row:
+                cur.execute("DELETE FROM recording_history WHERE id = ?", (row[0],))
+
+        # 2. recording_queue: delete matching unprotected rows
+        cur.execute("""
+            DELETE FROM recording_queue
+            WHERE protected = 0
+              AND (file_path = ? OR file_path = ? OR file_path LIKE ?)
+        """, (file_path_str, fname, f"%/{fname}"))
+
+        if cur.rowcount == 0:
+            cur.execute("""
+                SELECT id FROM recording_queue
+                WHERE protected = 0
+                  AND status = 'COMPLETED'
+                  AND (title = ? OR ? LIKE (title || '%'))
+                ORDER BY id ASC
+                LIMIT 1
+            """, (stem, stem))
+            row = cur.fetchone()
+            if row:
+                cur.execute("DELETE FROM recording_queue WHERE id = ?", (row[0],))
+
         conn.commit()
         conn.close()
 

@@ -536,7 +536,25 @@ class ConfigManager:
 
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._last_mtime = self.config_file.stat().st_mtime if self.config_file.exists() else 0.0
         self.data = self._load()
+
+    def reload_if_changed(self) -> bool:
+        """
+        Reloads configuration from disk if config.json has been modified
+        by another process or UI settings dialog.
+        """
+        try:
+            if not self.config_file.exists():
+                return False
+            mtime = self.config_file.stat().st_mtime
+            if mtime > getattr(self, "_last_mtime", 0.0):
+                self.data = self._load()
+                self._last_mtime = mtime
+                return True
+        except Exception as e:
+            print(f"Error checking config reload: {e}")
+        return False
 
     def _load(self) -> Dict[str, Any]:
         if self.config_file.exists():
@@ -766,6 +784,10 @@ class ConfigManager:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, self.config_file)
+            try:
+                self._last_mtime = self.config_file.stat().st_mtime
+            except Exception:
+                pass
         except Exception as e:
             print(f"Error saving configuration: {e}")
 
@@ -1081,6 +1103,7 @@ class ConfigManager:
 
     @property
     def auto_cleanup_enabled(self) -> bool:
+        self.reload_if_changed()
         return self.data.get("auto_cleanup_enabled", False)
 
     @auto_cleanup_enabled.setter
@@ -1090,6 +1113,7 @@ class ConfigManager:
 
     @property
     def retention_days(self) -> int:
+        self.reload_if_changed()
         return self.data.get("retention_days", 14)
 
     @retention_days.setter
@@ -1099,6 +1123,7 @@ class ConfigManager:
 
     @property
     def min_free_disk_gb(self) -> int:
+        self.reload_if_changed()
         return self.data.get("min_free_disk_gb", 50)
 
     @min_free_disk_gb.setter
@@ -1108,6 +1133,7 @@ class ConfigManager:
 
     @property
     def custom_recording_folder(self) -> str:
+        self.reload_if_changed()
         return self.data.get("custom_recording_folder", "")
 
     @custom_recording_folder.setter
@@ -1117,6 +1143,7 @@ class ConfigManager:
 
     @property
     def custom_kaffeine_path(self) -> str:
+        self.reload_if_changed()
         return self.data.get("custom_kaffeine_path", "")
 
     @custom_kaffeine_path.setter
@@ -1153,6 +1180,7 @@ class ConfigManager:
 
     @property
     def max_history_entries(self) -> int:
+        self.reload_if_changed()
         return self.data.get("max_history_entries", 50)
 
     @max_history_entries.setter

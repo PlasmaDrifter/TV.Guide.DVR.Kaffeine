@@ -221,6 +221,9 @@ class StorageManager:
         Protected recordings are preserved unless include_protected is True.
         Returns a summary report of actions taken.
         """
+        if hasattr(self.config_mgr, "reload_if_changed"):
+            self.config_mgr.reload_if_changed()
+
         if not force and not delete_all and not self.config_mgr.auto_cleanup_enabled:
             return {"enabled": False, "deleted_count": 0, "freed_gb": 0.0}
 

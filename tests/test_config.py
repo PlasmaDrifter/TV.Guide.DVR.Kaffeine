@@ -196,5 +196,25 @@ def test_guide_auto_advance_interval_clamping(isolated_config: ConfigManager):
     assert cfg.guide_auto_advance_interval == 2
 
 
+def test_config_reload_if_changed(isolated_config: ConfigManager):
+    import json
+    import time
+    cfg = isolated_config
+    assert cfg.min_free_disk_gb == 50
 
+    # Simulate another process modifying config.json
+    with open(cfg.config_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data["min_free_disk_gb"] = 350
+    data["auto_cleanup_enabled"] = True
+    data["retention_days"] = 3
 
+    # Ensure mtime increments
+    time.sleep(0.05)
+    with open(cfg.config_file, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    # Calling property should automatically reload without restarting
+    assert cfg.min_free_disk_gb == 350
+    assert cfg.auto_cleanup_enabled is True
+    assert cfg.retention_days == 3

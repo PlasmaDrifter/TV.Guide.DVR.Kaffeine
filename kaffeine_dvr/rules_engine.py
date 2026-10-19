@@ -47,14 +47,15 @@ class RulesEngine:
     def get_rules(self) -> List[Dict[str, Any]]:
         return self.config_mgr.rules
 
-    def add_rule(self, title_keyword: str, channel: str = "All", buffer_mins: Optional[int] = None) -> Dict[str, Any]:
+    def add_rule(self, title_keyword: str, channel: str = "All", buffer_mins: Optional[int] = None, protected: bool = False) -> Dict[str, Any]:
         rules = self.config_mgr.rules
         rule = {
             "id": str(uuid.uuid4())[:8],
             "title_keyword": title_keyword.strip(),
             "channel": channel.strip(),
             "enabled": True,
-            "buffer_mins": buffer_mins
+            "buffer_mins": buffer_mins,
+            "protected": bool(protected)
         }
         rules.append(rule)
         self.config_mgr.rules = rules
@@ -64,7 +65,7 @@ class RulesEngine:
         rules = [r for r in self.config_mgr.rules if r.get("id") != rule_id]
         self.config_mgr.rules = rules
 
-    def update_rule(self, rule_id: str, title_keyword: str, channel: str = "All", enabled: bool = True, buffer_mins: Optional[int] = None) -> bool:
+    def update_rule(self, rule_id: str, title_keyword: str, channel: str = "All", enabled: bool = True, buffer_mins: Optional[int] = None, protected: bool = False) -> bool:
         rules = self.config_mgr.rules
         found = False
         for r in rules:
@@ -73,6 +74,7 @@ class RulesEngine:
                 r["channel"] = channel.strip()
                 r["enabled"] = enabled
                 r["buffer_mins"] = buffer_mins
+                r["protected"] = bool(protected)
                 found = True
                 break
         if found:
@@ -85,6 +87,21 @@ class RulesEngine:
             if r.get("id") == rule_id:
                 r["enabled"] = enabled
         self.config_mgr.rules = rules
+
+    def toggle_rule_protected(self, rule_id: str, protected: Optional[bool] = None) -> bool:
+        """Toggles or sets the protected status of a rule."""
+        rules = self.config_mgr.rules
+        new_val = False
+        for r in rules:
+            if r.get("id") == rule_id:
+                if protected is not None:
+                    r["protected"] = bool(protected)
+                else:
+                    r["protected"] = not bool(r.get("protected", False))
+                new_val = r["protected"]
+                break
+        self.config_mgr.rules = rules
+        return new_val
 
     def evaluate_and_schedule(self, progress_callback=None) -> List[Dict[str, Any]]:
         """
@@ -111,6 +128,7 @@ class RulesEngine:
         for rule in active_rules:
             kw = rule.get("title_keyword", "").strip()
             ch = rule.get("channel", "All")
+            is_rule_prot = bool(rule.get("protected", False))
             if not kw:
                 continue
 
@@ -154,14 +172,19 @@ class RulesEngine:
                 if existing_rec:
                     if existing_rec.get("status") != "QUEUED":
                         continue
+                    # Upgrade protection if rule is protected and existing queue record is not protected
+                    if is_rule_prot and not existing_rec.get("protected"):
+                        queue_mgr.toggle_protected(existing_rec["id"])
+                        existing_rec["protected"] = 1
                     if existing_rec.get("buffer_mins", 0) == applied_buffer:
                         continue
 
                 # Add or update deferred DVR queue
                 try:
                     buf_note = f" (+{applied_buffer}m buffer)" if applied_buffer > 0 else ""
+                    prot_note = " [Protected]" if is_rule_prot else ""
                     if progress_callback:
-                        progress_callback(f"Queueing: {rec_title}{buf_note} on {prog_channel} ({prog.get('start_time_local')})...")
+                        progress_callback(f"Queueing: {rec_title}{buf_note}{prot_note} on {prog_channel} ({prog.get('start_time_local')})...")
 
                     qid = queue_mgr.add_recording(
                         title=rec_title,
@@ -169,19 +192,22 @@ class RulesEngine:
                         start_iso=start_iso,
                         duration_iso=duration_iso,
                         lead_time_mins=self.config_mgr.lead_time_mins,
-                        buffer_mins=applied_buffer
+                        buffer_mins=applied_buffer,
+                        protected=is_rule_prot
                     )
                     existing_by_sig[sig] = {
                         "id": qid,
                         "status": "QUEUED",
-                        "buffer_mins": applied_buffer
+                        "buffer_mins": applied_buffer,
+                        "protected": 1 if is_rule_prot else 0
                     }
                     if not existing_rec:
                         newly_scheduled.append({
                             "id": qid,
                             "title": rec_title,
                             "channel": prog_channel,
-                            "start_time": prog.get("start_time_local")
+                            "start_time": prog.get("start_time_local"),
+                            "protected": is_rule_prot
                         })
                 except Exception as e:
                     print(f"Error queueing '{rec_title}': {e}")

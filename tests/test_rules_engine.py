@@ -91,3 +91,56 @@ def test_sports_buffer_threshold_over_91_minutes(isolated_config, isolated_guide
     game_rec = next(x for x in queue_items_2 if x["id"] == scheduled_game[0]["id"])
     assert game_rec["buffer_mins"] == 45
 
+
+def test_rules_protected_flag_and_propagation(isolated_config, isolated_guide_svc, isolated_queue_mgr):
+    from unittest.mock import MagicMock
+
+    dbus = KaffeineDbusClient()
+    re = RulesEngine(isolated_config, dbus, isolated_guide_svc, isolated_queue_mgr)
+
+    # 1. Add rule with protected=True
+    rule = re.add_rule("The Conners", channel="ABC 15.1", buffer_mins=5, protected=True)
+    assert rule["title_keyword"] == "The Conners"
+    assert rule["channel"] == "ABC 15.1"
+    assert rule["protected"] is True
+
+    # 2. Toggle protection
+    new_state = re.toggle_rule_protected(rule["id"])
+    assert new_state is False
+    assert re.get_rules()[0]["protected"] is False
+
+    new_state = re.toggle_rule_protected(rule["id"], protected=True)
+    assert new_state is True
+    assert re.get_rules()[0]["protected"] is True
+
+    # 3. Update rule preserves or changes protected
+    re.update_rule(rule["id"], "The Conners", channel="All", enabled=True, buffer_mins=0, protected=True)
+    assert re.get_rules()[0]["protected"] is True
+
+    # 4. Evaluate rule schedules recordings with protected=1
+    episode = {
+        "show_title": "The Conners",
+        "episode_title": "Season Finale",
+        "summary": "The family gathers for a special occasion.",
+        "kaffeine_channel": "ABC 15.1",
+        "start_iso": "2026-10-19T20:00:00",
+        "duration_iso": "00:30:00",
+        "start_time_local": "2026-10-19 08:00 PM",
+    }
+    re.guide_service.search_programs = MagicMock(return_value=[episode])
+    scheduled = re.evaluate_and_schedule()
+    assert len(scheduled) == 1
+    assert scheduled[0]["protected"] is True
+
+    queued = isolated_queue_mgr.list_queue()
+    assert len(queued) == 1
+    assert queued[0]["title"] == "The Conners - Season Finale"
+    assert queued[0]["protected"] == 1
+
+    # 5. Existing unprotected queue item is upgraded when evaluated against a protected rule
+    isolated_queue_mgr.toggle_protected(queued[0]["id"])
+    assert isolated_queue_mgr.get_recording(queued[0]["id"])["protected"] == 0
+
+    re.evaluate_and_schedule()
+    assert isolated_queue_mgr.get_recording(queued[0]["id"])["protected"] == 1
+

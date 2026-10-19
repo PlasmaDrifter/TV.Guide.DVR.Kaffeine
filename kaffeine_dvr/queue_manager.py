@@ -196,7 +196,8 @@ class QueueManager:
         lead_time_mins: int = 5,
         buffer_mins: int = 0,
         is_timeshift: bool = False,
-        original_start_iso: Optional[str] = None
+        original_start_iso: Optional[str] = None,
+        protected: bool = False
     ) -> int:
         orig_start = original_start_iso or start_iso
         # Calculate end_iso and buffered duration
@@ -230,6 +231,7 @@ class QueueManager:
             pass
         initial_notified = 1 if is_already_started else 0
         is_timeshift_val = 1 if is_timeshift else 0
+        prot_val = 1 if protected else 0
 
         # Check for duplicates or update if still QUEUED
         cur.execute("""
@@ -246,9 +248,10 @@ class QueueManager:
                         end_iso = ?, lead_time_mins = ?, buffer_mins = ?,
                         notified = CASE WHEN ? = 1 THEN 1 ELSE notified END,
                         is_timeshift = ?,
-                        original_start_iso = COALESCE(original_start_iso, ?)
+                        original_start_iso = COALESCE(original_start_iso, ?),
+                        protected = CASE WHEN ? = 1 THEN 1 ELSE protected END
                     WHERE id = ?
-                """, (title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, orig_start, existing_id))
+                """, (title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val, existing_id))
                 conn.commit()
             elif is_already_started:
                 cur.execute("UPDATE recording_queue SET notified = 1 WHERE id = ?", (existing_id,))
@@ -261,9 +264,9 @@ class QueueManager:
         cur.execute("""
             INSERT INTO recording_queue (
                 title, channel, start_iso, duration_iso, start_time_local,
-                end_iso, lead_time_mins, status, created_at, buffer_mins, notified, is_timeshift, original_start_iso
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?)
-        """, (title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val, orig_start))
+                end_iso, lead_time_mins, status, created_at, buffer_mins, notified, is_timeshift, original_start_iso, protected
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)
+        """, (title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val))
         new_id = cur.lastrowid
         conn.commit()
         conn.close()

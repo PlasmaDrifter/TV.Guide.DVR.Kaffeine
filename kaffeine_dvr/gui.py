@@ -1116,11 +1116,15 @@ class ManualRecordDialog(BaseFramelessDialog):
         self.buffer_spin.setValue(default_buffer_mins)
         self.buffer_spin.setSuffix(" minutes")
 
+        self.protect_check = QCheckBox("Protect Recording (Keep Forever)")
+        self.protect_check.setToolTip("Mark recording as protected so it is never purged or auto-deleted.")
+
         layout.addRow("Title:", self.title_input)
         layout.addRow("Channel:", self.channel_combo)
         layout.addRow("Start (ISO):", self.start_input)
         layout.addRow("Duration (HH:MM:SS):", self.duration_input)
         layout.addRow("End Buffer (Post-Roll):", self.buffer_spin)
+        layout.addRow("Retain Mode:", self.protect_check)
 
         btn_box = QHBoxLayout()
         self.ok_btn = QPushButton("Schedule")
@@ -1134,7 +1138,7 @@ class ManualRecordDialog(BaseFramelessDialog):
 
 
 class AddRuleDialog(BaseFramelessDialog):
-    def __init__(self, channels: List[str], parent=None, default_title: str = ""):
+    def __init__(self, channels: List[str], parent=None, default_title: str = "", default_channel: str = "All"):
         super().__init__(parent)
         self.setWindowTitle("Add Auto-Record Rule")
         self.setMinimumWidth(380)
@@ -1149,6 +1153,10 @@ class AddRuleDialog(BaseFramelessDialog):
         self.channel_combo = ThemedComboBox()
         self.channel_combo.addItem("All")
         self.channel_combo.addItems(channels)
+        if default_channel:
+            idx = self.channel_combo.findText(default_channel)
+            if idx >= 0:
+                self.channel_combo.setCurrentIndex(idx)
 
         self.buffer_spin = QSpinBox()
         self.buffer_spin.setRange(0, 180)
@@ -1156,9 +1164,13 @@ class AddRuleDialog(BaseFramelessDialog):
         self.buffer_spin.setSuffix(" min")
         self.buffer_spin.setValue(0)
 
+        self.protect_check = QCheckBox("Protect Recordings (Keep Forever)")
+        self.protect_check.setToolTip("Mark all matching episodes as protected so they are never purged or auto-deleted.")
+
         layout.addRow("Show Keyword / Title:", self.keyword_input)
         layout.addRow("Channel:", self.channel_combo)
         layout.addRow("Custom End Buffer:", self.buffer_spin)
+        layout.addRow("Retain Mode:", self.protect_check)
 
         btn_box = QHBoxLayout()
         self.ok_btn = QPushButton("Save Rule")
@@ -1172,7 +1184,7 @@ class AddRuleDialog(BaseFramelessDialog):
 
 
 class EditRuleDialog(BaseFramelessDialog):
-    def __init__(self, channels: List[str], rule_id: str, keyword: str, channel: str, enabled: bool, buffer_mins: Optional[int] = None, parent=None):
+    def __init__(self, channels: List[str], rule_id: str, keyword: str, channel: str, enabled: bool, buffer_mins: Optional[int] = None, protected: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Auto-Record Rule")
         self.setMinimumWidth(380)
@@ -1200,6 +1212,10 @@ class EditRuleDialog(BaseFramelessDialog):
         self.buffer_spin.setSuffix(" min")
         self.buffer_spin.setValue(buffer_mins if (buffer_mins is not None and buffer_mins > 0) else 0)
 
+        self.protect_check = QCheckBox("Protect Recordings (Keep Forever)")
+        self.protect_check.setChecked(bool(protected))
+        self.protect_check.setToolTip("Mark all matching episodes as protected so they are never purged or auto-deleted.")
+
         self.enabled_check = QCheckBox("Enable Rule")
         self.enabled_check.setChecked(enabled)
 
@@ -1207,6 +1223,7 @@ class EditRuleDialog(BaseFramelessDialog):
         layout.addRow("Show Keyword / Title:", self.keyword_input)
         layout.addRow("Channel:", self.channel_combo)
         layout.addRow("Custom End Buffer:", self.buffer_spin)
+        layout.addRow("Retain Mode:", self.protect_check)
         layout.addRow("Status:", self.enabled_check)
 
         btn_box = QHBoxLayout()
@@ -6863,6 +6880,10 @@ class MainWindow(QMainWindow):
         self.edit_rule_btn.clicked.connect(self.edit_rule_dialog)
         ctrl_bar.addWidget(self.edit_rule_btn)
 
+        self.toggle_rule_protect_btn = QPushButton("Toggle Retain")
+        self.toggle_rule_protect_btn.clicked.connect(self.toggle_selected_rule_protected)
+        ctrl_bar.addWidget(self.toggle_rule_protect_btn)
+
         self.remove_rule_btn = QPushButton("Remove Selected Rule")
         self.remove_rule_btn.clicked.connect(self.remove_selected_rule)
         ctrl_bar.addWidget(self.remove_rule_btn)
@@ -6875,8 +6896,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(ctrl_bar)
 
         self.rules_table = QTableWidget()
-        self.rules_table.setColumnCount(5)
-        self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Enabled"])
+        self.rules_table.setColumnCount(6)
+        self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled"])
         self.rules_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.rules_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rules_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -12531,12 +12552,13 @@ class MainWindow(QMainWindow):
             start = dlg.start_input.text().strip()
             dur = dlg.duration_input.text().strip()
             buf = dlg.buffer_spin.value()
+            is_prot = dlg.protect_check.isChecked()
             if not title or not start or not dur:
                 QMessageBox.warning(self, "Invalid Input", "Please fill in all fields.")
                 return
             try:
                 lead = self.config_mgr.lead_time_mins
-                qid = self.queue_mgr.add_recording(title, ch, start, dur, lead_time_mins=lead, buffer_mins=buf)
+                qid = self.queue_mgr.add_recording(title, ch, start, dur, lead_time_mins=lead, buffer_mins=buf, protected=is_prot)
                 armed = self.watcher.check_and_dispatch(notify=False)
                 buf_msg = f" (+{buf}m buffer)" if buf > 0 else ""
                 if armed > 0:
@@ -15820,12 +15842,21 @@ class MainWindow(QMainWindow):
 
         show_title = prog.get("show_title", "")
         ch = prog.get("kaffeine_channel", "All")
-        self.rules_engine.add_rule(show_title, ch, buffer_mins=None)
-        self.refresh_rules()
-        self.tabs.setCurrentIndex(1)
-        if hasattr(self, "recordings_subtabs"):
-            self.recordings_subtabs.setCurrentIndex(2)
-        self.run_rules(silent=False)
+        channels = self.config_mgr.get_ordered_channels()
+        dlg = AddRuleDialog(channels, self, default_title=show_title, default_channel=ch)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            kw = dlg.keyword_input.text().strip()
+            ch = dlg.channel_combo.currentText()
+            buf = dlg.buffer_spin.value()
+            rule_buf = buf if buf > 0 else None
+            is_protected = dlg.protect_check.isChecked()
+            if kw:
+                self.rules_engine.add_rule(kw, ch, buffer_mins=rule_buf, protected=is_protected)
+                self.refresh_rules()
+                self.tabs.setCurrentIndex(1)
+                if hasattr(self, "recordings_subtabs"):
+                    self.recordings_subtabs.setCurrentIndex(2)
+                self.run_rules(silent=False)
 
     # ------------------ RULES LOGIC ------------------
     def refresh_rules(self):
@@ -15842,10 +15873,32 @@ class MainWindow(QMainWindow):
             buf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.rules_table.setItem(row, 3, buf_item)
 
+            is_prot = bool(r.get("protected", False))
+            prot_item = QTableWidgetItem("Protected" if is_prot else "Auto")
+            prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if is_prot:
+                prot_item.setForeground(QColor("#28a745"))
+                prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
+            else:
+                prot_item.setForeground(QColor("#a0aec0"))
+            self.rules_table.setItem(row, 4, prot_item)
+
             enabled_str = "Yes" if r.get("enabled", True) else "No"
             enabled_item = QTableWidgetItem(enabled_str)
             enabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.rules_table.setItem(row, 4, enabled_item)
+            self.rules_table.setItem(row, 5, enabled_item)
+
+    def toggle_selected_rule_protected(self):
+        row = self.rules_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Selection Required", "Please select a rule from the table to toggle retain mode.")
+            return
+        rule_id = self.rules_table.item(row, 0).text()
+        rule_kw = self.rules_table.item(row, 1).text()
+        new_state = self.rules_engine.toggle_rule_protected(rule_id)
+        state_str = "Protected (Keep Forever)" if new_state else "Standard (Auto-cleanup eligible)"
+        self.status_bar.showMessage(f"Rule '{rule_kw}' retain mode set to {state_str}.", 4000)
+        self.refresh_rules()
 
     def add_rule_dialog(self):
         channels = self.config_mgr.get_ordered_channels()
@@ -15855,8 +15908,9 @@ class MainWindow(QMainWindow):
             ch = dlg.channel_combo.currentText()
             buf = dlg.buffer_spin.value()
             rule_buf = buf if buf > 0 else None
+            is_protected = dlg.protect_check.isChecked()
             if kw:
-                self.rules_engine.add_rule(kw, ch, buffer_mins=rule_buf)
+                self.rules_engine.add_rule(kw, ch, buffer_mins=rule_buf, protected=is_protected)
                 self.refresh_rules()
                 self.tabs.setCurrentIndex(1)
                 if hasattr(self, "recordings_subtabs"):
@@ -15872,10 +15926,11 @@ class MainWindow(QMainWindow):
         rule_id = self.rules_table.item(row, 0).text()
         current_kw = self.rules_table.item(row, 1).text()
         current_ch = self.rules_table.item(row, 2).text()
-        current_enabled = self.rules_table.item(row, 4).text() == "Yes"
+        current_enabled = self.rules_table.item(row, 5).text() == "Yes"
 
         rule_obj = next((r for r in self.rules_engine.get_rules() if str(r.get("id")) == rule_id), {})
         current_buffer = rule_obj.get("buffer_mins")
+        current_protected = bool(rule_obj.get("protected", False))
 
         channels = self.config_mgr.get_ordered_channels()
         dlg = EditRuleDialog(
@@ -15885,6 +15940,7 @@ class MainWindow(QMainWindow):
             channel=current_ch,
             enabled=current_enabled,
             buffer_mins=current_buffer,
+            protected=current_protected,
             parent=self
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
@@ -15893,13 +15949,15 @@ class MainWindow(QMainWindow):
             new_enabled = dlg.enabled_check.isChecked()
             buf = dlg.buffer_spin.value()
             new_buffer = buf if buf > 0 else None
+            new_protected = dlg.protect_check.isChecked()
             if new_kw:
                 self.rules_engine.update_rule(
                     rule_id=rule_id,
                     title_keyword=new_kw,
                     channel=new_ch,
                     enabled=new_enabled,
-                    buffer_mins=new_buffer
+                    buffer_mins=new_buffer,
+                    protected=new_protected
                 )
                 self.refresh_rules()
                 self.status_bar.showMessage(f"Rule '{new_kw}' updated.", 4000)

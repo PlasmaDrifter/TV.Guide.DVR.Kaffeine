@@ -2850,6 +2850,51 @@ class TableButtonCell(QWidget):
         layout.addWidget(button)
 
 
+def parse_duration_seconds(dur_str: str) -> int:
+    """Parses 'HH:MM:SS' or 'MM:SS' or seconds string into total seconds."""
+    if not dur_str:
+        return 0
+    try:
+        parts = [int(p) for p in str(dur_str).strip().split(":")]
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        elif len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        elif len(parts) == 1:
+            return parts[0]
+    except Exception:
+        pass
+    return 0
+
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    """
+    QTableWidgetItem with custom sorting support via an optional sort_key.
+    Supports numbers, strings (case-insensitive), dates, tuples, etc.
+    """
+    def __init__(self, text: str = "", sort_key: Any = None):
+        super().__init__(text)
+        self.sort_key = sort_key if sort_key is not None else text
+
+    def __lt__(self, other):
+        if isinstance(other, SortableTableWidgetItem):
+            k1 = self.sort_key
+            k2 = other.sort_key
+            if k1 is None and k2 is None:
+                return False
+            if k1 is None:
+                return True
+            if k2 is None:
+                return False
+            if isinstance(k1, str) and isinstance(k2, str):
+                return k1.lower() < k2.lower()
+            try:
+                return k1 < k2
+            except TypeError:
+                return str(k1).lower() < str(k2).lower()
+        return super().__lt__(other)
+
+
 class OpacitySliderPopup(QFrame):
     """
     Compact popup displaying an opacity percentage label, interactive horizontal slider,
@@ -6450,14 +6495,23 @@ class MainWindow(QMainWindow):
         for i in range(7):
             rec_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         rec_hdr.setSectionsMovable(True)
+        rec_hdr.setSortIndicatorShown(True)
+        rec_hdr.setSectionsClickable(True)
         saved_rec_hdr = self.settings.value("rec_table_header_state")
         if saved_rec_hdr:
             try:
                 rec_hdr.restoreState(saved_rec_hdr)
             except Exception:
                 pass
+        if rec_hdr.count() != 7:
+            self.rec_table.setColumnCount(7)
+            self.rec_table.setHorizontalHeaderLabels(["Watch", "Title", "Schedule", "Channel", "Duration", "Status", "Retain"])
+        if not saved_rec_hdr:
+            rec_hdr.setSortIndicator(2, Qt.SortOrder.AscendingOrder)
         rec_hdr.sectionMoved.connect(self._save_rec_table_header_state)
         rec_hdr.sectionResized.connect(self._save_rec_table_header_state)
+        rec_hdr.sortIndicatorChanged.connect(self._save_rec_table_header_state)
+        self.rec_table.setSortingEnabled(True)
         self.rec_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rec_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.rec_table.itemDoubleClicked.connect(self._on_rec_table_double_clicked)
@@ -6517,6 +6571,8 @@ class MainWindow(QMainWindow):
         for i in range(7):
             hist_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         hist_hdr.setSectionsMovable(True)
+        hist_hdr.setSortIndicatorShown(True)
+        hist_hdr.setSectionsClickable(True)
         saved_hist_hdr = self.settings.value("history_table_header_state")
         if saved_hist_hdr:
             try:
@@ -6526,8 +6582,12 @@ class MainWindow(QMainWindow):
         if hist_hdr.count() != 7:
             self.history_table.setColumnCount(7)
             self.history_table.setHorizontalHeaderLabels(["Watch", "Title", "Date / Time", "Channel", "Runtime", "Status", "Retain"])
+        if not saved_hist_hdr:
+            hist_hdr.setSortIndicator(2, Qt.SortOrder.DescendingOrder)
         hist_hdr.sectionMoved.connect(self._save_history_table_header_state)
         hist_hdr.sectionResized.connect(self._save_history_table_header_state)
+        hist_hdr.sortIndicatorChanged.connect(self._save_history_table_header_state)
+        self.history_table.setSortingEnabled(True)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.history_table.itemDoubleClicked.connect(self._on_history_table_double_clicked)
@@ -6898,11 +6958,35 @@ class MainWindow(QMainWindow):
         self.rules_table = QTableWidget()
         self.rules_table.setColumnCount(6)
         self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled"])
-        self.rules_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        rules_hdr = self.rules_table.horizontalHeader()
+        for i in range(6):
+            rules_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        rules_hdr.setSectionsMovable(True)
+        rules_hdr.setSortIndicatorShown(True)
+        rules_hdr.setSectionsClickable(True)
+        saved_rules_hdr = self.settings.value("rules_table_header_state")
+        if saved_rules_hdr:
+            try:
+                rules_hdr.restoreState(saved_rules_hdr)
+            except Exception:
+                pass
+        if rules_hdr.count() != 6:
+            self.rules_table.setColumnCount(6)
+            self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled"])
+        if not saved_rules_hdr:
+            rules_hdr.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
+        rules_hdr.sectionMoved.connect(self._save_rules_table_header_state)
+        rules_hdr.sectionResized.connect(self._save_rules_table_header_state)
+        rules_hdr.sortIndicatorChanged.connect(self._save_rules_table_header_state)
+        self.rules_table.setSortingEnabled(True)
         self.rules_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rules_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.rules_table.itemDoubleClicked.connect(lambda item: self.edit_rule_dialog())
         layout.addWidget(self.rules_table)
+        self.rules_table_resize_filter = TableViewportResizeFilter(self._adjust_table_columns, self)
+        self.rules_table.viewport().installEventFilter(self.rules_table_resize_filter)
+        self.rules_table_toggle_filter = TableRowToggleFilter(self.rules_table, self)
+        self.rules_table.viewport().installEventFilter(self.rules_table_toggle_filter)
 
         return widget
 
@@ -10463,6 +10547,23 @@ class MainWindow(QMainWindow):
                     h.resizeSection(i, fw)
                 h.blockSignals(False)
 
+        # 3. Auto-Record Rules Table
+        if hasattr(self, "rules_table") and not self.settings.contains("rules_table_header_state"):
+            rules_w = self.rules_table.viewport().width()
+            if rules_w > 100:
+                # ID, Title / Keyword, Channel, End Buffer, Retain, Enabled
+                min_widths = [50, 180, 100, 110, 80, 80]
+                shares = [0.08, 0.44, 0.18, 0.12, 0.09, 0.09]
+                allocated = [max(mw, int(rules_w * s)) for mw, s in zip(min_widths, shares)]
+                diff = rules_w - sum(allocated)
+                if diff > 0:
+                    allocated[1] += diff
+                h = self.rules_table.horizontalHeader()
+                h.blockSignals(True)
+                for i, fw in enumerate(allocated):
+                    h.resizeSection(i, fw)
+                h.blockSignals(False)
+
     def _auto_save_automation_settings(self):
         """Silently persist automation and storage retention settings whenever any control is changed."""
         if not hasattr(self, "lead_time_spin") or not hasattr(self, "cleanup_enable_check"):
@@ -12006,115 +12107,140 @@ class MainWindow(QMainWindow):
             if it:
                 selected_qid = it.data(Qt.ItemDataRole.UserRole)
 
-        self.rec_table.setRowCount(len(queue))
-        restored_row = -1
+        was_sorting = self.rec_table.isSortingEnabled()
+        self.rec_table.setSortingEnabled(False)
+        try:
+            self.rec_table.setRowCount(len(queue))
 
-        for row, rec in enumerate(queue):
-            qid = rec.get("id")
-            if selected_qid is not None and qid == selected_qid:
-                restored_row = row
-            title = rec.get("title", "")
-            channel = rec.get("channel", "")
-            duration = rec.get("duration_iso", "")
-            status = rec.get("status", "QUEUED")
-            start_iso = rec.get("start_iso", "")
+            for row, rec in enumerate(queue):
+                qid = rec.get("id")
+                title = rec.get("title", "")
+                channel = rec.get("channel", "")
+                duration = rec.get("duration_iso", "")
+                status = rec.get("status", "QUEUED")
+                start_iso = rec.get("start_iso", "")
 
-            # Schedule text (e.g. Sat @ 1700 or Next Thu (Oct 15) @ 1700)
-            schedule_text = ""
-            full_date_text = rec.get("start_time_local", "")
-            try:
-                dt = datetime.fromisoformat(start_iso)
-                full_date_text = dt.strftime("%A, %B %d, %Y at %I:%M %p")
-                diff_days = (dt.date() - today).days
-                time_24 = dt.strftime("%H%M")
-                if diff_days == 0:
-                    schedule_text = f"Today @ {time_24}"
-                elif diff_days == 1:
-                    schedule_text = f"Tomorrow @ {time_24}"
-                elif 2 <= diff_days < 7:
-                    schedule_text = f"{dt.strftime('%a')} @ {time_24}"
-                elif 7 <= diff_days < 14:
-                    schedule_text = f"Next {dt.strftime('%a')} ({dt.strftime('%b %d')}) @ {time_24}"
-                elif diff_days >= 14:
-                    schedule_text = f"{dt.strftime('%a, %b %d')} @ {time_24}"
-                elif diff_days == -1:
-                    schedule_text = f"Yesterday @ {time_24}"
+                # Schedule text (e.g. Sat @ 1700 or Next Thu (Oct 15) @ 1700)
+                schedule_text = ""
+                full_date_text = rec.get("start_time_local", "")
+                try:
+                    dt = datetime.fromisoformat(start_iso)
+                    full_date_text = dt.strftime("%A, %B %d, %Y at %I:%M %p")
+                    diff_days = (dt.date() - today).days
+                    time_24 = dt.strftime("%H%M")
+                    if diff_days == 0:
+                        schedule_text = f"Today @ {time_24}"
+                    elif diff_days == 1:
+                        schedule_text = f"Tomorrow @ {time_24}"
+                    elif 2 <= diff_days < 7:
+                        schedule_text = f"{dt.strftime('%a')} @ {time_24}"
+                    elif 7 <= diff_days < 14:
+                        schedule_text = f"Next {dt.strftime('%a')} ({dt.strftime('%b %d')}) @ {time_24}"
+                    elif diff_days >= 14:
+                        schedule_text = f"{dt.strftime('%a, %b %d')} @ {time_24}"
+                    elif diff_days == -1:
+                        schedule_text = f"Yesterday @ {time_24}"
+                    else:
+                        schedule_text = f"Past ({dt.strftime('%b %d')}) @ {time_24}"
+                except Exception:
+                    schedule_text = full_date_text
+
+                # Col 0: Watch
+                if status in ("RECORDING", "COMPLETED"):
+                    watch_btn = QPushButton("▶ Watch")
+                    watch_btn.setObjectName("tableWatchBtn")
+                    watch_btn.setFixedSize(78, 24)
+                    watch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    rec_copy = dict(rec)
+                    watch_btn.clicked.connect(lambda checked=False, r=rec_copy: self.play_recording_item(r))
+                    cell = TableButtonCell(watch_btn)
+                    self.rec_table.setCellWidget(row, 0, cell)
+                    watch_item = SortableTableWidgetItem("", sort_key=1)
+                    watch_item.setData(Qt.ItemDataRole.UserRole, qid)
+                    self.rec_table.setItem(row, 0, watch_item)
                 else:
-                    schedule_text = f"Past ({dt.strftime('%b %d')}) @ {time_24}"
-            except Exception:
-                schedule_text = full_date_text
+                    self.rec_table.removeCellWidget(row, 0)
+                    empty_it = SortableTableWidgetItem("", sort_key=0)
+                    empty_it.setData(Qt.ItemDataRole.UserRole, qid)
+                    self.rec_table.setItem(row, 0, empty_it)
 
-            if status in ("RECORDING", "COMPLETED"):
-                watch_btn = QPushButton("▶ Watch")
-                watch_btn.setObjectName("tableWatchBtn")
-                watch_btn.setFixedSize(78, 24)
-                watch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                rec_copy = dict(rec)
-                watch_btn.clicked.connect(lambda checked=False, r=rec_copy: self.play_recording_item(r))
-                cell = TableButtonCell(watch_btn)
-                self.rec_table.setCellWidget(row, 0, cell)
-                watch_item = QTableWidgetItem("")
-                watch_item.setData(Qt.ItemDataRole.UserRole, qid)
-                self.rec_table.setItem(row, 0, watch_item)
-            else:
-                self.rec_table.removeCellWidget(row, 0)
-                empty_it = QTableWidgetItem("")
-                empty_it.setData(Qt.ItemDataRole.UserRole, qid)
-                self.rec_table.setItem(row, 0, empty_it)
+                # Col 1: Title
+                title_item = SortableTableWidgetItem(title, sort_key=title)
+                title_item.setData(Qt.ItemDataRole.UserRole, qid)
+                self.rec_table.setItem(row, 1, title_item)
 
-            title_item = QTableWidgetItem(title)
-            title_item.setData(Qt.ItemDataRole.UserRole, qid)
-            self.rec_table.setItem(row, 1, title_item)
+                # Col 2: Schedule (chronological sort by start_iso)
+                sched_item = SortableTableWidgetItem(schedule_text, sort_key=start_iso)
+                sched_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                self.rec_table.setItem(row, 2, sched_item)
 
-            sched_item = QTableWidgetItem(schedule_text)
-            sched_item.setFont(QFont("", -1, QFont.Weight.Bold))
-            self.rec_table.setItem(row, 2, sched_item)
+                # Col 3: Channel
+                self.rec_table.setItem(row, 3, SortableTableWidgetItem(channel, sort_key=channel))
 
-            self.rec_table.setItem(row, 3, QTableWidgetItem(channel))
+                # Col 4: Duration (numeric sort by total seconds including buffer)
+                buf_val = rec.get("buffer_mins", 0) or 0
+                if buf_val > 0:
+                    duration_display = f"{duration} (+{buf_val}m)"
+                else:
+                    duration_display = duration
+                dur_secs = parse_duration_seconds(duration) + (buf_val * 60)
+                dur_item = SortableTableWidgetItem(duration_display, sort_key=dur_secs)
+                self.rec_table.setItem(row, 4, dur_item)
 
-            buf_val = rec.get("buffer_mins", 0) or 0
-            if buf_val > 0:
-                duration_display = f"{duration} (+{buf_val}m)"
-            else:
-                duration_display = duration
-            dur_item = QTableWidgetItem(duration_display)
-            self.rec_table.setItem(row, 4, dur_item)
+                # Col 5: Status (sort by priority order)
+                status_display = status
+                color = "#007bff"
+                if status == "QUEUED":
+                    lead = self.config_mgr.lead_time_mins
+                    status_display = f"Queued (Arms {lead}m before show)"
+                    color = "#17a2b8"
+                elif status == "ARMED":
+                    status_display = "Armed in Kaffeine"
+                    color = "#fd7e14"
+                elif status == "RECORDING":
+                    status_display = "Recording Now"
+                    color = "#ff5252"
+                elif status == "COMPLETED":
+                    status_display = "Completed"
+                    color = "#28a745"
+                elif status == "PURGED":
+                    status_display = "Purged (Auto-Deleted)"
+                    color = "#8c98aa"
 
-            status_display = status
-            color = "#007bff"
-            if status == "QUEUED":
-                lead = self.config_mgr.lead_time_mins
-                status_display = f"Queued (Arms {lead}m before show)"
-                color = "#17a2b8"
-            elif status == "ARMED":
-                status_display = "Armed in Kaffeine"
-                color = "#fd7e14"
-            elif status == "RECORDING":
-                status_display = "Recording Now"
-                color = "#ff5252"
-            elif status == "COMPLETED":
-                status_display = "Completed"
-                color = "#28a745"
-            elif status == "PURGED":
-                status_display = "Purged (Auto-Deleted)"
-                color = "#8c98aa"
+                status_sort_order = {
+                    "RECORDING": 0,
+                    "ARMED": 1,
+                    "QUEUED": 2,
+                    "COMPLETED": 3,
+                    "PURGED": 4,
+                }
+                status_prio = status_sort_order.get(status, 99)
+                status_item = SortableTableWidgetItem(status_display, sort_key=(status_prio, status_display))
+                status_item.setForeground(QColor(color))
+                self.rec_table.setItem(row, 5, status_item)
 
-            status_item = QTableWidgetItem(status_display)
-            status_item.setForeground(QColor(color))
-            self.rec_table.setItem(row, 5, status_item)
+                # Col 6: Retain (Protected = 1, Auto = 0)
+                is_prot = bool(rec.get("protected", 0))
+                prot_item = SortableTableWidgetItem("Protected" if is_prot else "Auto", sort_key=1 if is_prot else 0)
+                prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if is_prot:
+                    prot_item.setForeground(QColor("#28a745"))
+                    prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                else:
+                    prot_item.setForeground(QColor("#a0aec0"))
+                self.rec_table.setItem(row, 6, prot_item)
+        finally:
+            self.rec_table.setSortingEnabled(was_sorting)
 
-            is_prot = bool(rec.get("protected", 0))
-            prot_item = QTableWidgetItem("Protected" if is_prot else "Auto")
-            prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if is_prot:
-                prot_item.setForeground(QColor("#28a745"))
-                prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
-            else:
-                prot_item.setForeground(QColor("#a0aec0"))
-            self.rec_table.setItem(row, 6, prot_item)
+        # Restore selection by QID after sorting
+        if selected_qid is not None:
+            for r in range(self.rec_table.rowCount()):
+                it = self.rec_table.item(r, 1) or self.rec_table.item(r, 0)
+                if it and it.data(Qt.ItemDataRole.UserRole) == selected_qid:
+                    self.rec_table.setCurrentCell(r, 1)
+                    break
 
-        if restored_row >= 0:
-            self.rec_table.setCurrentCell(restored_row, 0)
+        self._adjust_table_columns()
 
         # Also refresh history table
         self.refresh_history(force=force)
@@ -12154,100 +12280,114 @@ class MainWindow(QMainWindow):
             if it:
                 selected_hid = it.data(Qt.ItemDataRole.UserRole)
 
-        self.history_table.setRowCount(len(hist))
-        restored_row = -1
+        was_sorting = self.history_table.isSortingEnabled()
+        self.history_table.setSortingEnabled(False)
+        try:
+            self.history_table.setRowCount(len(hist))
 
-        for row, item in enumerate(hist):
-            hid = item.get("id")
-            if selected_hid is not None and hid == selected_hid:
-                restored_row = row
-            title = item.get("title", "")
-            channel = item.get("channel", "")
-            duration = item.get("duration_iso", "")
-            start_iso = item.get("start_iso", "")
-            start_local = item.get("start_time_local", "")
+            for row, item in enumerate(hist):
+                hid = item.get("id")
+                title = item.get("title", "")
+                channel = item.get("channel", "")
+                duration = item.get("duration_iso", "")
+                start_iso = item.get("start_iso", "")
+                start_local = item.get("start_time_local", "")
 
-            # Format Date / Time nicely
-            date_time_str = start_local
-            try:
-                dt = datetime.fromisoformat(start_iso)
-                date_time_str = dt.strftime("%A, %b %d, %Y @ %I:%M %p")
-            except Exception:
-                pass
+                # Format Date / Time nicely
+                date_time_str = start_local
+                try:
+                    dt = datetime.fromisoformat(start_iso)
+                    date_time_str = dt.strftime("%A, %b %d, %Y @ %I:%M %p")
+                except Exception:
+                    pass
 
-            # Check file availability on disk
-            is_avail, resolved_file, size_bytes = self.storage_mgr.check_history_file_availability(item)
-            if is_avail and resolved_file and item.get("file_path") != str(resolved_file):
-                self.queue_mgr.update_history_file_path(hid, str(resolved_file))
-                item["file_path"] = str(resolved_file)
+                # Check file availability on disk
+                is_avail, resolved_file, size_bytes = self.storage_mgr.check_history_file_availability(item)
+                if is_avail and resolved_file and item.get("file_path") != str(resolved_file):
+                    self.queue_mgr.update_history_file_path(hid, str(resolved_file))
+                    item["file_path"] = str(resolved_file)
 
-            watch_btn = QPushButton("▶ Watch")
-            watch_btn.setObjectName("tableWatchBtn")
-            watch_btn.setFixedSize(78, 24)
+                # Col 0: Watch
+                watch_btn = QPushButton("▶ Watch")
+                watch_btn.setObjectName("tableWatchBtn")
+                watch_btn.setFixedSize(78, 24)
 
-            if is_avail:
-                watch_btn.setEnabled(True)
-                watch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                hist_copy = dict(item)
-                hist_copy["status"] = "COMPLETED"
-                watch_btn.clicked.connect(lambda checked=False, r=hist_copy: self.play_recording_item(r))
-            else:
-                watch_btn.setEnabled(False)
-                watch_btn.setToolTip("Video file is no longer on the drive.")
-
-            cell = TableButtonCell(watch_btn)
-            self.history_table.setCellWidget(row, 0, cell)
-            watch_item = QTableWidgetItem("")
-            watch_item.setData(Qt.ItemDataRole.UserRole, hid)
-            self.history_table.setItem(row, 0, watch_item)
-
-            title_item = QTableWidgetItem(title)
-            title_item.setData(Qt.ItemDataRole.UserRole, hid)
-            self.history_table.setItem(row, 1, title_item)
-
-            dt_item = QTableWidgetItem(date_time_str)
-            chan_item = QTableWidgetItem(channel)
-            dur_item = QTableWidgetItem(duration)
-
-            self.history_table.setItem(row, 2, dt_item)
-            self.history_table.setItem(row, 3, chan_item)
-            self.history_table.setItem(row, 4, dur_item)
-
-            # Column 5: Status (Disk Availability)
-            if is_avail:
-                size_gb = size_bytes / (1024 ** 3)
-                if size_gb >= 1.0:
-                    status_text = f"Available ({size_gb:.1f} GB)"
+                if is_avail:
+                    watch_btn.setEnabled(True)
+                    watch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    hist_copy = dict(item)
+                    hist_copy["status"] = "COMPLETED"
+                    watch_btn.clicked.connect(lambda checked=False, r=hist_copy: self.play_recording_item(r))
                 else:
-                    size_mb = size_bytes / (1024 ** 2)
-                    status_text = f"Available ({size_mb:.0f} MB)"
-                status_color = "#28a745"
-                tooltip_text = f"File on drive: {resolved_file}\nSize: {status_text.split('(')[1][:-1]}"
-            else:
-                status_text = "Deleted from Disk"
-                status_color = "#8c98aa"
-                tooltip_text = "Video file was purged or removed from the recording drive."
+                    watch_btn.setEnabled(False)
+                    watch_btn.setToolTip("Video file is no longer on the drive.")
 
-            status_item = QTableWidgetItem(status_text)
-            status_item.setForeground(QColor(status_color))
-            status_item.setToolTip(tooltip_text)
-            self.history_table.setItem(row, 5, status_item)
+                cell = TableButtonCell(watch_btn)
+                self.history_table.setCellWidget(row, 0, cell)
+                watch_item = SortableTableWidgetItem("", sort_key=1 if is_avail else 0)
+                watch_item.setData(Qt.ItemDataRole.UserRole, hid)
+                self.history_table.setItem(row, 0, watch_item)
 
-            # Column 6: Retain / Protected
-            is_prot = bool(item.get("protected", 0))
-            prot_item = QTableWidgetItem("Protected" if is_prot else "Auto")
-            prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if is_prot:
-                prot_item.setForeground(QColor("#28a745"))
-                prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
-                prot_item.setToolTip("Protected: Will not be cleared from history or deleted by auto-cleanup.")
-            else:
-                prot_item.setForeground(QColor("#a0aec0"))
-                prot_item.setToolTip("Auto: Eligible for auto-cleanup and history clearing.")
-            self.history_table.setItem(row, 6, prot_item)
+                # Col 1: Title
+                title_item = SortableTableWidgetItem(title, sort_key=title)
+                title_item.setData(Qt.ItemDataRole.UserRole, hid)
+                self.history_table.setItem(row, 1, title_item)
 
-        if restored_row >= 0:
-            self.history_table.setCurrentCell(restored_row, 1)
+                # Col 2: Date / Time (chronological sort by start_iso)
+                dt_item = SortableTableWidgetItem(date_time_str, sort_key=start_iso)
+                self.history_table.setItem(row, 2, dt_item)
+
+                # Col 3: Channel
+                self.history_table.setItem(row, 3, SortableTableWidgetItem(channel, sort_key=channel))
+
+                # Col 4: Runtime (numeric sort by duration seconds)
+                dur_secs = parse_duration_seconds(duration)
+                self.history_table.setItem(row, 4, SortableTableWidgetItem(duration, sort_key=dur_secs))
+
+                # Col 5: Status (Disk Availability - sort by file size in bytes)
+                if is_avail:
+                    size_gb = size_bytes / (1024 ** 3)
+                    if size_gb >= 1.0:
+                        status_text = f"Available ({size_gb:.1f} GB)"
+                    else:
+                        size_mb = size_bytes / (1024 ** 2)
+                        status_text = f"Available ({size_mb:.0f} MB)"
+                    status_color = "#28a745"
+                    tooltip_text = f"File on drive: {resolved_file}\nSize: {status_text.split('(')[1][:-1]}"
+                    status_sort_key = size_bytes
+                else:
+                    status_text = "Deleted from Disk"
+                    status_color = "#8c98aa"
+                    tooltip_text = "Video file was purged or removed from the recording drive."
+                    status_sort_key = -1
+
+                status_item = SortableTableWidgetItem(status_text, sort_key=status_sort_key)
+                status_item.setForeground(QColor(status_color))
+                status_item.setToolTip(tooltip_text)
+                self.history_table.setItem(row, 5, status_item)
+
+                # Col 6: Retain / Protected (Protected = 1, Auto = 0)
+                is_prot = bool(item.get("protected", 0))
+                prot_item = SortableTableWidgetItem("Protected" if is_prot else "Auto", sort_key=1 if is_prot else 0)
+                prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if is_prot:
+                    prot_item.setForeground(QColor("#28a745"))
+                    prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                    prot_item.setToolTip("Protected: Will not be cleared from history or deleted by auto-cleanup.")
+                else:
+                    prot_item.setForeground(QColor("#a0aec0"))
+                    prot_item.setToolTip("Auto: Eligible for auto-cleanup and history clearing.")
+                self.history_table.setItem(row, 6, prot_item)
+        finally:
+            self.history_table.setSortingEnabled(was_sorting)
+
+        # Restore selection by HID after sorting
+        if selected_hid is not None:
+            for r in range(self.history_table.rowCount()):
+                it = self.history_table.item(r, 1) or self.history_table.item(r, 0)
+                if it and it.data(Qt.ItemDataRole.UserRole) == selected_hid:
+                    self.history_table.setCurrentCell(r, 1)
+                    break
 
         self._adjust_table_columns()
 
@@ -13745,6 +13885,11 @@ class MainWindow(QMainWindow):
         """Persists the user's custom column placements for the history table."""
         if hasattr(self, "history_table") and hasattr(self, "settings"):
             self.settings.setValue("history_table_header_state", self.history_table.horizontalHeader().saveState())
+
+    def _save_rules_table_header_state(self, *args):
+        """Persists the user's custom column placements for the auto-record rules table."""
+        if hasattr(self, "rules_table") and hasattr(self, "settings"):
+            self.settings.setValue("rules_table_header_state", self.rules_table.horizontalHeader().saveState())
 
     def _scroll_list_to_first_active(self):
         """Scroll list guide table to the first live or upcoming show."""
@@ -15861,32 +16006,64 @@ class MainWindow(QMainWindow):
     # ------------------ RULES LOGIC ------------------
     def refresh_rules(self):
         rules = self.rules_engine.get_rules()
-        self.rules_table.setRowCount(len(rules))
-        for row, r in enumerate(rules):
-            self.rules_table.setItem(row, 0, QTableWidgetItem(str(r.get("id"))))
-            self.rules_table.setItem(row, 1, QTableWidgetItem(r.get("title_keyword", "")))
-            self.rules_table.setItem(row, 2, QTableWidgetItem(r.get("channel", "All")))
 
-            buf_val = r.get("buffer_mins")
-            buf_str = f"+{buf_val}m" if (buf_val is not None and buf_val > 0) else "Auto / Default"
-            buf_item = QTableWidgetItem(buf_str)
-            buf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.rules_table.setItem(row, 3, buf_item)
+        # Preserve selected rule by ID
+        selected_rule_id = None
+        cur_row = self.rules_table.currentRow()
+        if cur_row >= 0:
+            it = self.rules_table.item(cur_row, 0)
+            if it:
+                selected_rule_id = it.text()
 
-            is_prot = bool(r.get("protected", False))
-            prot_item = QTableWidgetItem("Protected" if is_prot else "Auto")
-            prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if is_prot:
-                prot_item.setForeground(QColor("#28a745"))
-                prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
-            else:
-                prot_item.setForeground(QColor("#a0aec0"))
-            self.rules_table.setItem(row, 4, prot_item)
+        was_sorting = self.rules_table.isSortingEnabled()
+        self.rules_table.setSortingEnabled(False)
+        try:
+            self.rules_table.setRowCount(len(rules))
+            for row, r in enumerate(rules):
+                r_id = r.get("id")
+                sort_id = int(r_id) if (r_id is not None and str(r_id).isdigit()) else r_id
+                self.rules_table.setItem(row, 0, SortableTableWidgetItem(str(r_id), sort_key=sort_id))
 
-            enabled_str = "Yes" if r.get("enabled", True) else "No"
-            enabled_item = QTableWidgetItem(enabled_str)
-            enabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.rules_table.setItem(row, 5, enabled_item)
+                kw = r.get("title_keyword", "")
+                self.rules_table.setItem(row, 1, SortableTableWidgetItem(kw, sort_key=kw))
+
+                ch = r.get("channel", "All")
+                self.rules_table.setItem(row, 2, SortableTableWidgetItem(ch, sort_key=ch))
+
+                buf_val = r.get("buffer_mins")
+                buf_str = f"+{buf_val}m" if (buf_val is not None and buf_val > 0) else "Auto / Default"
+                buf_sort_key = buf_val if (buf_val is not None and buf_val > 0) else -1
+                buf_item = SortableTableWidgetItem(buf_str, sort_key=buf_sort_key)
+                buf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.rules_table.setItem(row, 3, buf_item)
+
+                is_prot = bool(r.get("protected", False))
+                prot_item = SortableTableWidgetItem("Protected" if is_prot else "Auto", sort_key=1 if is_prot else 0)
+                prot_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if is_prot:
+                    prot_item.setForeground(QColor("#28a745"))
+                    prot_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                else:
+                    prot_item.setForeground(QColor("#a0aec0"))
+                self.rules_table.setItem(row, 4, prot_item)
+
+                enabled = r.get("enabled", True)
+                enabled_str = "Yes" if enabled else "No"
+                enabled_item = SortableTableWidgetItem(enabled_str, sort_key=1 if enabled else 0)
+                enabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.rules_table.setItem(row, 5, enabled_item)
+        finally:
+            self.rules_table.setSortingEnabled(was_sorting)
+
+        # Restore selection after sorting
+        if selected_rule_id is not None:
+            for r in range(self.rules_table.rowCount()):
+                it = self.rules_table.item(r, 0)
+                if it and it.text() == selected_rule_id:
+                    self.rules_table.setCurrentCell(r, 1)
+                    break
+
+        self._adjust_table_columns()
 
     def toggle_selected_rule_protected(self):
         row = self.rules_table.currentRow()

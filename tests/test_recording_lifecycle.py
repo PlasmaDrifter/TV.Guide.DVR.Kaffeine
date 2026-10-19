@@ -762,4 +762,170 @@ def test_cancelling_recording_clears_guide_detail_panel(qtbot, isolated_config: 
     assert win.cancel_guide_btn.isHidden()
 
 
+def test_recording_schedule_sortable_columns(qtbot, isolated_config: ConfigManager):
+    """Verifies that all three subtabs (Active Schedule, History, Auto-Record Rules) have sortable columns with custom sort keys."""
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    # ------------------ 1. Active Schedule (rec_table) ------------------
+    assert win.rec_table.isSortingEnabled() is True
+    assert win.rec_table.horizontalHeader().isSortIndicatorShown() is True
+
+    now = datetime.now()
+    # Rec A: Alpha Show, +10h, 00:30:00 (+15m buf = 2700s), QUEUED, Auto
+    qid_a = win.queue_mgr.add_recording(
+        "Alpha Show", "NBC 4.1", (now + timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M:%S"), "00:30:00"
+    )
+    win.queue_mgr.update_recording_buffer(qid_a, 15)
+
+    # Rec B: Zebra Show, +1h, 02:00:00 (7200s), RECORDING, Protected
+    qid_b = win.queue_mgr.add_recording(
+        "Zebra Show", "CBS 2.1", (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S"), "02:00:00"
+    )
+    win.queue_mgr.toggle_protected(qid_b)
+
+    # Rec C: Middle Show, +5h, 01:00:00 (3600s), ARMED, Auto
+    qid_c = win.queue_mgr.add_recording(
+        "Middle Show", "FOX 5.1", (now + timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%S"), "01:00:00"
+    )
+
+    conn = win.queue_mgr._get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE recording_queue SET status = 'RECORDING' WHERE id = ?", (qid_b,))
+    cur.execute("UPDATE recording_queue SET status = 'ARMED' WHERE id = ?", (qid_c,))
+    conn.commit()
+    conn.close()
+
+    win.refresh_recordings(force=True)
+    assert win.rec_table.rowCount() == 3
+
+    # Sort by Title ASC (col 1)
+    win.rec_table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Alpha Show"
+    assert win.rec_table.item(1, 1).text() == "Middle Show"
+    assert win.rec_table.item(2, 1).text() == "Zebra Show"
+
+    # Sort by Title DESC (col 1)
+    win.rec_table.sortByColumn(1, Qt.SortOrder.DescendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Zebra Show"
+    assert win.rec_table.item(1, 1).text() == "Middle Show"
+    assert win.rec_table.item(2, 1).text() == "Alpha Show"
+
+    # Sort by Schedule Chronological ASC (col 2): Zebra (+1h), Middle (+5h), Alpha (+10h)
+    win.rec_table.sortByColumn(2, Qt.SortOrder.AscendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Zebra Show"
+    assert win.rec_table.item(1, 1).text() == "Middle Show"
+    assert win.rec_table.item(2, 1).text() == "Alpha Show"
+
+    # Sort by Duration DESC (col 4): Zebra (7200s), Middle (3600s), Alpha (2700s)
+    win.rec_table.sortByColumn(4, Qt.SortOrder.DescendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Zebra Show"
+    assert win.rec_table.item(1, 1).text() == "Middle Show"
+    assert win.rec_table.item(2, 1).text() == "Alpha Show"
+
+    # Sort by Status ASC (col 5): RECORDING (prio 0), ARMED (prio 1), QUEUED (prio 2)
+    win.rec_table.sortByColumn(5, Qt.SortOrder.AscendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Zebra Show"
+    assert win.rec_table.item(1, 1).text() == "Middle Show"
+    assert win.rec_table.item(2, 1).text() == "Alpha Show"
+
+    # Sort by Retain DESC (col 6): Protected (1) then Auto (0)
+    win.rec_table.sortByColumn(6, Qt.SortOrder.DescendingOrder)
+    assert win.rec_table.item(0, 1).text() == "Zebra Show"
+    assert win.rec_table.item(0, 6).text() == "Protected"
+
+    # Verify watch button cell widget travels with the row
+    # "Zebra Show" is RECORDING, so its row should have the watch button
+    zebra_row = -1
+    for r in range(win.rec_table.rowCount()):
+        if win.rec_table.item(r, 1).text() == "Zebra Show":
+            zebra_row = r
+            break
+    assert zebra_row >= 0
+    assert _extract_watch_button(win.rec_table.cellWidget(zebra_row, 0)) is not None
+
+    # Verify selection is preserved across refreshes with custom sort
+    win.rec_table.setCurrentCell(zebra_row, 1)
+    win.refresh_recordings(force=True)
+    cur_row = win.rec_table.currentRow()
+    assert cur_row >= 0
+    assert win.rec_table.item(cur_row, 1).text() == "Zebra Show"
+
+    # ------------------ 2. History (history_table) ------------------
+    assert win.history_table.isSortingEnabled() is True
+    assert win.history_table.horizontalHeader().isSortIndicatorShown() is True
+
+    # Add dummy history items
+    win.queue_mgr.add_history_entry(
+        "Zebra History", "CBS 2.1", (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "00:45:00", file_path="/tmp/fake1.ts", protected=1
+    )
+    win.queue_mgr.add_history_entry(
+        "Alpha History", "NBC 4.1", (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "01:30:00", file_path="/tmp/fake2.ts", protected=0
+    )
+    win.refresh_history(force=True)
+    assert win.history_table.rowCount() >= 2
+
+    # Sort history by Title ASC (col 1)
+    win.history_table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+    assert win.history_table.item(0, 1).text() == "Alpha History"
+
+    # Sort history by Date/Time DESC (col 2): Alpha (-1 day) is newer than Zebra (-2 days)
+    win.history_table.sortByColumn(2, Qt.SortOrder.DescendingOrder)
+    assert win.history_table.item(0, 1).text() == "Alpha History"
+    assert win.history_table.item(1, 1).text() == "Zebra History"
+
+    # Sort history by Retain DESC (col 6): Zebra is Protected
+    win.history_table.sortByColumn(6, Qt.SortOrder.DescendingOrder)
+    assert win.history_table.item(0, 1).text() == "Zebra History"
+    assert win.history_table.item(0, 6).text() == "Protected"
+
+    # ------------------ 3. Auto-Record Rules (rules_table) ------------------
+    assert win.rules_table.isSortingEnabled() is True
+    assert win.rules_table.horizontalHeader().isSortIndicatorShown() is True
+
+    win.rules_engine.add_rule("Zorro", "All", buffer_mins=5, protected=False)
+    win.rules_engine.add_rule("Batman", "NBC 4.1", buffer_mins=15, protected=True)
+    win.rules_engine.add_rule("Avatar", "CBS 2.1", buffer_mins=None, protected=False)
+    win.refresh_rules()
+    assert win.rules_table.rowCount() == 3
+
+    # Sort by Keyword ASC (col 1): Avatar, Batman, Zorro
+    win.rules_table.sortByColumn(1, Qt.SortOrder.AscendingOrder)
+    assert win.rules_table.item(0, 1).text() == "Avatar"
+    assert win.rules_table.item(1, 1).text() == "Batman"
+    assert win.rules_table.item(2, 1).text() == "Zorro"
+
+    # Sort by End Buffer DESC (col 3): Batman (+15m), Zorro (+5m), Avatar (Auto / -1)
+    win.rules_table.sortByColumn(3, Qt.SortOrder.DescendingOrder)
+    assert win.rules_table.item(0, 1).text() == "Batman"
+    assert win.rules_table.item(1, 1).text() == "Zorro"
+    assert win.rules_table.item(2, 1).text() == "Avatar"
+
+    # Sort by Retain DESC (col 4): Batman is Protected
+    win.rules_table.sortByColumn(4, Qt.SortOrder.DescendingOrder)
+    assert win.rules_table.item(0, 1).text() == "Batman"
+    assert win.rules_table.item(0, 4).text() == "Protected"
+
+    # Test selection restoration on rules_table
+    win.rules_table.setCurrentCell(0, 1)  # Batman
+    win.refresh_rules()
+    assert win.rules_table.currentRow() >= 0
+    assert win.rules_table.item(win.rules_table.currentRow(), 1).text() == "Batman"
+
+    # Test rules table header persistence
+    rules_h = win.rules_table.horizontalHeader()
+    rules_h.setSortIndicator(3, Qt.SortOrder.AscendingOrder)
+    rules_state = rules_h.saveState()
+    win.settings.setValue("rules_table_header_state", rules_state)
+
+    # Recreate window to test restoreState
+    win2 = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win2)
+    assert win2.rules_table.horizontalHeader().sortIndicatorSection() == 3
+    assert win2.rules_table.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+
+
+
 

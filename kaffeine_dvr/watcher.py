@@ -400,14 +400,20 @@ class Watcher:
                 continue
 
             try:
+                start_dt = datetime.fromisoformat(rec["start_iso"])
                 end_dt = datetime.fromisoformat(rec["end_iso"])
             except Exception as e:
                 print(f"Error parsing timestamps for interrupted recording #{qid}: {e}", flush=True)
                 continue
 
+            # If show has not even reached its broadcast airtime yet, it is simply ARMED waiting to start
+            if now < start_dt:
+                continue
+
             # If show has already ended, skip recovery (update_statuses will archive it)
             if now >= end_dt:
                 continue
+
 
             # Calculate remaining time, considering single tuner conflicts with upcoming shows on other channels
             target_end_dt = end_dt

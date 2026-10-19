@@ -180,3 +180,36 @@ def test_recover_interrupted_recording_prevent_duplicate_loops(isolated_queue_mg
         assert second_pass == 0
 
     assert mock_dbus.schedule_recording.call_count == 1
+
+
+def test_recover_interrupted_recording_bypasses_future_armed_show(isolated_queue_mgr: QueueManager, isolated_config: ConfigManager):
+    # Current time is 10:20:00, show is scheduled to start in 10 minutes (10:30:00)
+    now = datetime(2026, 10, 17, 10, 20, 0)
+    start_iso = "2026-10-17T10:30:00"
+
+    qid = isolated_queue_mgr.add_recording(
+        title="Upcoming Armed Show",
+        channel="Fox",
+        start_iso=start_iso,
+        duration_iso="00:30:00",
+        buffer_mins=0
+    )
+    isolated_queue_mgr.mark_armed(qid, 301)
+
+    mock_dbus = MagicMock()
+    mock_dbus.is_running.return_value = True
+    mock_dbus._list_via_dbus.return_value = []
+
+    watcher = Watcher(dbus_client=mock_dbus, queue_mgr=isolated_queue_mgr, config_mgr=isolated_config)
+
+    with patch("kaffeine_dvr.watcher.datetime") as mock_dt:
+        mock_dt.now.return_value = now
+        mock_dt.fromisoformat = datetime.fromisoformat
+
+        recovered = watcher.recover_interrupted_recordings()
+        assert recovered == 0
+
+    assert mock_dbus.schedule_recording.call_count == 0
+    rec = isolated_queue_mgr.get_recording(qid)
+    # Status must remain ARMED and NOT prematurely converted to RECORDING
+    assert rec["status"] == "ARMED"

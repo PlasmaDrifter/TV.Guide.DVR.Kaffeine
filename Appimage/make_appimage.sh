@@ -126,3 +126,8 @@ rm -rf AppDir build dist
 
 echo "=== AppImage created successfully at $OUTPUT_APPIMAGE ==="
 
+if systemctl --user is-active --quiet kaffeine-dvr-watcher.service 2>/dev/null; then
+    echo "=== Restarting kaffeine-dvr-watcher.service to apply updates ==="
+    systemctl --user restart kaffeine-dvr-watcher.service || true
+fi
+

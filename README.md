@@ -54,8 +54,8 @@ Kaffeine is a powerful digital TV viewer for KDE and Linux desktop environments,
 
 | Traditional EPG Grid TV Guide View |
 |:---:|
-| [![Traditional EPG Grid TV Guide View](docs/screenshots/guide_grid.png)](docs/screenshots/guide_grid.png) |
 | [![Traditional EPG Grid TV Guide View](docs/screenshots/guide_grid_2.png)](docs/screenshots/guide_grid_2.png) |
+| https://github.com/user-attachments/assets/3ab864fb-ab3a-4bb9-80d2-14157244a014 |
 
 | Mix and Match Themes - Grid and App themes Separately |
 |:---:|

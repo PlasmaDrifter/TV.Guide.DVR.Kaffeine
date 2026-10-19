@@ -2464,7 +2464,7 @@ class RecordingConflictDialog(BaseFramelessDialog):
         lbl_trim_sub.setWordWrap(True)
         lbl_trim_sub.setStyleSheet(f"font-size: 12px; color: {text_secondary}; margin-left: 28px;")
         lbl_trim_sub.setCursor(Qt.CursorShape.PointingHandCursor)
-        lbl_trim_sub.mousePressEvent = lambda e: (self.trim_radio.setChecked(True), None)
+        lbl_trim_sub.mousePressEvent = lambda e: self.trim_radio.setChecked(True)
         opt1_layout.addWidget(lbl_trim_sub)
         options_box.addLayout(opt1_layout)
 
@@ -2476,9 +2476,10 @@ class RecordingConflictDialog(BaseFramelessDialog):
         lbl_delay_sub.setWordWrap(True)
         lbl_delay_sub.setStyleSheet(f"font-size: 12px; color: {text_secondary}; margin-left: 28px;")
         lbl_delay_sub.setCursor(Qt.CursorShape.PointingHandCursor)
-        lbl_delay_sub.mousePressEvent = lambda e: (self.delay_radio.setChecked(True), None)
+        lbl_delay_sub.mousePressEvent = lambda e: self.delay_radio.setChecked(True)
         opt2_layout.addWidget(lbl_delay_sub)
         options_box.addLayout(opt2_layout)
+
 
         # Option 3 layout
         opt3_layout = QVBoxLayout()

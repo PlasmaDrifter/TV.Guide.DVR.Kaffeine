@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QDialog,
     QLabel,
     QMenu,
     QMessageBox,
@@ -1463,16 +1464,74 @@ def test_jump_guide_to_now_intervals(qtbot, isolated_config, monkeypatch):
     assert win._last_auto_advanced_block == (2026, 10, 18, 12)
 
 
+def test_ensure_kaffeine_running_on_startup(qtbot, isolated_config):
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    launched_modes = []
+
+    class MockDbusClient:
+        def __init__(self, running=False):
+            self._running = running
+
+        def is_running(self):
+            return self._running
+
+        def launch_kaffeine(self, mode="tray"):
+            launched_modes.append(mode)
+            self._running = True
+            return True
+
+    win.dbus_client = MockDbusClient(running=False)
+    win.config_mgr.launch_mode = "taskbar"
+
+    win.ensure_kaffeine_running_on_startup()
+    assert launched_modes == ["taskbar"]
+
+    # When already running, it should not call launch_kaffeine again
+    win.ensure_kaffeine_running_on_startup()
+    assert launched_modes == ["taskbar"]
 
 
+def test_check_first_run_launches_kaffeine(qtbot, isolated_config, monkeypatch):
+    isolated_config.first_run_completed = False
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
 
+    launched_modes = []
 
+    class MockDbusClient:
+        def is_running(self):
+            return False
 
+        def launch_kaffeine(self, mode="tray"):
+            launched_modes.append(mode)
+            return True
 
+    win.dbus_client = MockDbusClient()
 
+    class MockWelcomeDialog:
+        def __init__(self, config_mgr, parent):
+            class MockCheck:
+                def isChecked(self):
+                    return False
 
+            class MockCombo:
+                def currentData(self, role=None):
+                    return "normal"
 
+            self.import_check = MockCheck()
+            self.service_check = MockCheck()
+            self.sync_check = MockCheck()
+            self.launch_mode_combo = MockCombo()
 
+        def exec(self):
+            return QDialog.DialogCode.Accepted
 
+    monkeypatch.setattr("kaffeine_dvr.gui.FirstRunWelcomeDialog", MockWelcomeDialog)
+    win.check_first_run()
 
+    assert isolated_config.first_run_completed is True
+    assert isolated_config.launch_mode == "normal"
+    assert launched_modes == ["normal"]
 

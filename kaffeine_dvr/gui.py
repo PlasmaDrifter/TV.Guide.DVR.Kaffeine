@@ -6309,6 +6309,8 @@ class MainWindow(QMainWindow):
         # Check for first-run setup wizard for new users
         if not os.environ.get("PYTEST_CURRENT_TEST"):
             QTimer.singleShot(600, self.check_first_run)
+            # Ensure Kaffeine is running in user's configured mode
+            QTimer.singleShot(1000, self.ensure_kaffeine_running_on_startup)
             # Run health check quietly on startup to populate settings dashboard
             QTimer.singleShot(1500, lambda: self.test_all_sources_health(silent=True))
             # Check monthly updates if enabled
@@ -9736,7 +9738,8 @@ class MainWindow(QMainWindow):
             "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Grid Zoom (+ / -):</b> Use the <b>+</b> and <b>−</b> zoom buttons to increase or decrease the font and tile size of the guide grid to your preference.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Maximize Grid:</b> Click the <b>⛶ Maximize</b> button (or press <b>Escape</b> to exit) to expand the guide grid to fill the entire application window.<br><br>"
             "• <b style='color: #60a5fa;'>Watching Live TV:</b><br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;– Switch to <b>TV Guide</b>. Double-click any live show tile or click <b>Watch Live</b> to tune Kaffeine.<br><br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– Switch to <b>TV Guide</b>. Double-click any live show tile or click <b>Watch Live</b> to tune Kaffeine.<br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– Kaffeine automatically runs in the background in your configured launch mode (tray, taskbar, or normal). If Kaffeine is manually closed or exited, tuning may time out on the first watch attempt depending on buffer settings while Kaffeine cold-starts and acquires physical tuner lock; simply click watch again or run Channel Strength Scan.<br><br>"
             "• <b style='color: #60a5fa;'>Scheduling DVR Recordings:</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Double-click upcoming shows or click <b>Record This Program</b> to queue a one-off recording.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Click <b>Auto-Record This Series</b> to create keyword auto-record rules that automatically capture all future airings.<br>"
@@ -9823,6 +9826,8 @@ class MainWindow(QMainWindow):
             "• <b style='color: #f87171;'>Unified Background Watcher Daemon:</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– A single background daemon (<code>kaffeine-dvr-watcher.service</code>) monitors the queue and syncs guide data.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– Right before showtime (e.g. 5 minutes early), it automatically launches Kaffeine minimized and arms the timer via D-Bus.<br><br>"
+            "• <b style='color: #f87171;'>Automatic Background Readiness:</b><br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– The TV Guide application automatically launches Kaffeine in the background upon setup and startup according to your chosen launch mode, ensuring physical tuner locks are fast and responsive.<br><br>"
             "• <b style='color: #f87171;'>Safe Power Operations:</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– You can reboot or shut down your PC freely at any time without Kaffeine freezing or blocking systemd."
         )
@@ -9843,7 +9848,8 @@ class MainWindow(QMainWindow):
             "• <b style='color: #60a5fa;'>Configurable Window Launch Modes (Settings &gt; Automation &amp; DVR):</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Minimized to Taskbar (Default):</b> Silently minimizes to KDE panel via <code>kdotool</code>/<code>xdotool</code> without disturbing desktop workspace.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Minimize to System Tray:</b> Starts with <code>-m</code> flag to dock cleanly into the KDE system tray.<br>"
-            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Normal Window:</b> Opens as a standard visible desktop window.<br><br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– <b>Normal Window:</b> Opens as a standard visible desktop window.<br>"
+            "&nbsp;&nbsp;&nbsp;&nbsp;– <i>Note:</i> Kaffeine is kept running in this mode on startup. If manually exited, the initial watch click may time out while Kaffeine cold-starts and acquires physical tuner lock.<br><br>"
             "• <b style='color: #60a5fa;'>Command Line Utility (kaffeine-dvr):</b><br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– <code>kaffeine-dvr --status</code> : Print provider health, cache counts, and Kaffeine status.<br>"
             "&nbsp;&nbsp;&nbsp;&nbsp;– <code>kaffeine-dvr --list</code>   : List scheduled recordings in the DVR queue.<br>"
@@ -10361,6 +10367,13 @@ class MainWindow(QMainWindow):
                         self.update_service_status_ui()
                     except Exception as e:
                         print(f"Error starting background service: {e}", flush=True)
+                # Automatically launch Kaffeine in user's configured mode immediately after initial setup
+                try:
+                    mode = getattr(self.config_mgr, "launch_mode", "tray")
+                    if hasattr(self, "dbus_client") and self.dbus_client and not self.dbus_client.is_running():
+                        self.dbus_client.launch_kaffeine(mode=mode)
+                except Exception as e:
+                    print(f"Error launching Kaffeine after welcome wizard: {e}", flush=True)
                 if dlg.sync_check.isChecked():
                     QTimer.singleShot(600, self.sync_guide)
             self.config_mgr.first_run_completed = True
@@ -12051,6 +12064,16 @@ class MainWindow(QMainWindow):
             self.guide_status_lbl.setToolTip(f"Last sync completed: {friendly_updated}")
         else:
             self.guide_status_lbl.setText("Guide: Not Synced")
+
+    def ensure_kaffeine_running_on_startup(self):
+        """Silently launch Kaffeine if not already running when the TV Guide opens."""
+        try:
+            if hasattr(self, "dbus_client") and self.dbus_client and not self.dbus_client.is_running():
+                mode = getattr(self.config_mgr, "launch_mode", "tray")
+                self.dbus_client.launch_kaffeine(mode=mode)
+                QTimer.singleShot(2500, self.update_status_badges)
+        except Exception as e:
+            print(f"Error ensuring Kaffeine is running on startup: {e}", flush=True)
 
     def launch_kaffeine(self):
         self.status_bar.showMessage("Launching Kaffeine...", 3000)

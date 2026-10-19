@@ -91,6 +91,16 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.1": (
+        "## What's Changed in v0.9.1\n\n"
+        "• **Dedicated Custom Grid Theme Trash Buttons**: Added a direct trash button next to each custom preset in Settings > Themes, allowing custom themes to be deleted without having to activate or switch to them first. Preserves the currently active theme when deleting an inactive custom preset, and removes the obsolete delete icon from the theme editor header.\n"
+        "• **Min Free Space Retention Cleanup & Entry Purging**: Fixed storage auto-cleanup threshold evaluation so low disk space triggers older unprotected recording cleanup reliably. Background daemon now detects disk config changes dynamically via configuration mtime tracking. When files are purged, matching records are now automatically cleared from both the recording schedule queue and history database tables, and database history is kept strictly within maximum entry limits.\n"
+        "• **Sortable Columns Across Recording Schedule**: Enabled interactive column header sorting across all Recording Schedule views (Active Schedule, All Scheduled, and History), making it easy to sort scheduled jobs and completed entries by channel, title, date, duration, or status.\n"
+        "• **Series Rule Recording Protection**: Added full recording protection support to automated series rules, ensuring automated episode recordings inherit retention protection against auto-cleanup.\n"
+        "• **Completed Recording Retention**: Retains completed recordings in the Active Schedule table for up to 6 hours after completion, providing quick visual confirmation before archiving.\n"
+        "• **Scheduler & Conflict Dialog Hardening**: Prevented premature mid-broadcast recovery scans on future scheduled or armed recordings, resolved an issue where clicking conflict option description labels caused an error in the conflict dialog, and ensured guide program details refresh cleanly upon recording cancellation.\n"
+        "• **AppImage Build Automation**: Integrated automatic background watcher service restart (kaffeine-dvr-watcher.service) directly into the AppImage packaging script to ensure deployed environments seamlessly run updated service logic."
+    ),
     "0.9.0": (
         "## What's Changed in v0.9.0\n\n"
         "• **Guide Auto-Advance Intervals (1, 2, and 3 Hours)**: Added 1, 2, and 3-hour interval options for Guide Auto-Advance on the hour. Re-engineered block-boundary tracking and dynamic viewport range safeguards so the guide stays anchored to the current multi-hour block and reliably advances when a new interval begins.\n"

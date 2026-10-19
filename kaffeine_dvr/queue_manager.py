@@ -1072,7 +1072,7 @@ class QueueManager:
         conn.close()
 
     def archive_to_history(self, queue_id: int):
-        """Immediately moves a completed or stopped recording into history."""
+        """Immediately moves a completed or stopped recording into history while retaining it in the active queue as COMPLETED."""
         conn = self._get_connection()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -1081,20 +1081,26 @@ class QueueManager:
         if rec:
             rec_dict = dict(rec)
             now_iso = datetime.now().isoformat()
-            cur.execute("""
-                INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                rec_dict.get("title", ""),
-                rec_dict.get("channel", ""),
-                rec_dict.get("start_iso", ""),
-                rec_dict.get("duration_iso", ""),
-                rec_dict.get("start_time_local", ""),
-                now_iso,
-                rec_dict.get("file_path"),
-                rec_dict.get("protected", 0)
-            ))
-            cur.execute("DELETE FROM recording_queue WHERE id = ?", (queue_id,))
+            # Avoid inserting duplicate history rows if already archived
+            cur.execute(
+                "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
+                (rec_dict.get("title", ""), rec_dict.get("channel", ""), rec_dict.get("start_iso", ""))
+            )
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rec_dict.get("title", ""),
+                    rec_dict.get("channel", ""),
+                    rec_dict.get("start_iso", ""),
+                    rec_dict.get("duration_iso", ""),
+                    rec_dict.get("start_time_local", ""),
+                    now_iso,
+                    rec_dict.get("file_path"),
+                    rec_dict.get("protected", 0)
+                ))
+            cur.execute("UPDATE recording_queue SET status = 'COMPLETED' WHERE id = ?", (queue_id,))
             conn.commit()
         conn.close()
 
@@ -1146,21 +1152,26 @@ class QueueManager:
                             except Exception as e:
                                 print(f"Notice: Failed to actively halt completed recording in Kaffeine: {e}", flush=True)
 
-                        # Archive to history once
-                        cur.execute("""
-                            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            rec.get("title", ""),
-                            rec.get("channel", ""),
-                            rec.get("start_iso", ""),
-                            rec.get("duration_iso", ""),
-                            rec.get("start_time_local", ""),
-                            now.isoformat(),
-                            rec.get("file_path"),
-                            rec.get("protected", 0)
-                        ))
-                        archived_count += 1
+                        # Archive to history once if not already present
+                        cur.execute(
+                            "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
+                            (rec.get("title", ""), rec.get("channel", ""), rec.get("start_iso", ""))
+                        )
+                        if not cur.fetchone():
+                            cur.execute("""
+                                INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                rec.get("title", ""),
+                                rec.get("channel", ""),
+                                rec.get("start_iso", ""),
+                                rec.get("duration_iso", ""),
+                                rec.get("start_time_local", ""),
+                                now.isoformat(),
+                                rec.get("file_path"),
+                                rec.get("protected", 0)
+                            ))
+                            archived_count += 1
 
                     # Remove from queue only after 6 hours from end_dt
                     if now >= retention_cutoff:

@@ -96,10 +96,19 @@ def test_archive_to_history(isolated_queue_mgr: QueueManager):
     qm.archive_to_history(q_id)
 
     assert len(qm.list_queue()) == 0
+    full_q = qm.list_queue(include_completed=True)
+    assert len(full_q) == 1
+    assert full_q[0]["status"] == "COMPLETED"
+
     hist = qm.list_history()
     assert len(hist) == 1
     assert hist[0]["title"] == "Recorded Show"
     assert hist[0]["channel"] == "FOX 10.1"
+
+    # Repeated archive call should not insert duplicate history entries
+    qm.archive_to_history(q_id)
+    assert len(qm.list_history()) == 1
+    assert len(qm.list_queue(include_completed=True)) == 1
 
 
 def test_stop_playback_dbus_call(monkeypatch):

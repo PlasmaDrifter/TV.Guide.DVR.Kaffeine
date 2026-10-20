@@ -40,3 +40,11 @@ def isolated_guide_svc(tmp_app_dirs, isolated_config):
     _, data_dir = tmp_app_dirs
     gs = GuideService(data_dir=data_dir, config_mgr=isolated_config)
     return gs
+
+@pytest.fixture(autouse=True)
+def isolate_qsettings(tmp_path: Path, monkeypatch):
+    from PyQt6.QtCore import QSettings
+    ini_path = str(tmp_path / "test_settings.ini")
+    fake_qsettings = lambda *args, **kwargs: QSettings(ini_path, QSettings.Format.IniFormat)
+    monkeypatch.setattr("PyQt6.QtCore.QSettings", fake_qsettings)
+    monkeypatch.setattr("kaffeine_dvr.gui.QSettings", fake_qsettings)

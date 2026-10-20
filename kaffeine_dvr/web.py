@@ -64,10 +64,11 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
     @property
     def server_obj(self) -> Optional["KaffeineWebServer"]:
+        """Returns the owner KaffeineWebServer instance."""
         return getattr(self.server, "owner", None)
 
     def log_message(self, fmt, *args):
-        # Quiet standard logging to keep stdout clean
+        """Silences default HTTP request console logging to keep terminal output clean."""
         pass
 
     def _send_json(self, data: Any, status: int = 200):
@@ -103,12 +104,10 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         q_token = qs.get("token", [""])[0]
-        if q_token and self.server_obj.is_valid_token(q_token):
-            return True
-
-        return False
+        return bool(q_token and self.server_obj.is_valid_token(q_token))
 
     def do_POST(self):
+        """Dispatches POST API requests including authentication, recording creation, and tuning."""
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
@@ -332,6 +331,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, status=404)
 
     def do_DELETE(self):
+        """Dispatches DELETE API requests to cancel scheduled or active recordings."""
         if not self._is_authenticated():
             self._send_json({"error": "Unauthorized"}, status=401)
             return
@@ -363,6 +363,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, status=404)
 
     def do_GET(self):
+        """Dispatches GET API and static web asset requests."""
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
@@ -753,6 +754,7 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, server_address, RequestHandlerClass, owner: "KaffeineWebServer"):
+        """Initializes threaded HTTP server and associates owner reference."""
         self.owner = owner
         super().__init__(server_address, RequestHandlerClass)
 
@@ -770,6 +772,7 @@ class KaffeineWebServer:
         watcher: Optional[Any] = None,
         on_queue_changed: Optional[Any] = None
     ):
+        """Initializes web server instance with application managers and bind settings."""
         self.config_mgr = config_mgr
         self.queue_mgr = queue_mgr
         self.guide_svc = guide_svc
@@ -840,6 +843,7 @@ class KaffeineWebServer:
             self.lockouts.pop(client_ip, None)
 
     def create_session_token(self) -> str:
+        """Generates a secure random 7-day authentication session token."""
         with self._lock:
             token = secrets.token_hex(24)
             # 7-day token expiration
@@ -847,6 +851,7 @@ class KaffeineWebServer:
             return token
 
     def is_valid_token(self, token: str) -> bool:
+        """Validates that a session token is active and unexpired."""
         with self._lock:
             exp = self.active_tokens.get(token)
             if exp and time.time() < exp:
@@ -856,6 +861,7 @@ class KaffeineWebServer:
             return False
 
     def is_running(self) -> bool:
+        """Returns True if the background web server thread is currently executing."""
         return self.server is not None and self.thread is not None and self.thread.is_alive()
 
     def start(self) -> bool:

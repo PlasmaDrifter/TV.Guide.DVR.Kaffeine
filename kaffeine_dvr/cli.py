@@ -22,6 +22,7 @@ except (ImportError, ValueError):
 
 
 def main():
+    """Parses command-line arguments and dispatches Kaffeine DVR actions."""
     parser = argparse.ArgumentParser(description="Kaffeine DVR & TV Guide CLI Manager")
     parser.add_argument("--gui", action="store_true", help="Launch the TV Guide & DVR graphical user interface")
     parser.add_argument("--sync", action="store_true", help="Sync web TV guide cache")
@@ -82,7 +83,7 @@ def main():
 
         print("\nGuide Sources Health:")
         health = guide.check_all_sources_health()
-        for key, s in health.items():
+        for s in health.values():
             lat = f"{s.get('latency_ms')}ms" if s.get('latency_ms', 0) > 0 else "-"
             print(f"- {s.get('name')}: [{s.get('status')}] (Latency: {lat}) -> {s.get('details')}")
         return

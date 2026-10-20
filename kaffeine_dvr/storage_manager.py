@@ -27,6 +27,7 @@ class StorageManager:
     SIDECAR_EXTENSIONS = {".txt", ".log", ".info"}
 
     def __init__(self, config_mgr=None, queue_mgr=None):
+        """Initializes storage manager with configuration and queue manager references."""
         from .config import ConfigManager
         from .queue_manager import QueueManager
         self.config_mgr = config_mgr or ConfigManager()
@@ -346,7 +347,7 @@ class StorageManager:
                     else:
                         stop_words = {"the", "and", "for", "with", "from", "show", "live", "news"}
                         meaningful_words = [w for w in query_words if w not in stop_words and len(w) > 3]
-                        words_to_check = meaningful_words if meaningful_words else [w for w in query_words if len(w) > 3]
+                        words_to_check = meaningful_words or [w for w in query_words if len(w) > 3]
                         if words_to_check:
                             matches = sum(1 for w in words_to_check if w in clean_fname)
                             ratio = matches / len(words_to_check)

@@ -25,29 +25,37 @@ SPORTS_KEYWORDS = (
 
 
 def is_sports_program(prog: Dict[str, Any]) -> bool:
+    """Determines whether a guide program matches sporting events or broadcasts."""
     title = (prog.get("show_title") or "").strip().lower()
     ep = (prog.get("episode_title") or "").strip().lower()
     summary = (prog.get("summary") or "").lower()
 
     if any(k in title for k in SPORTS_KEYWORDS):
         return True
-    if any(k in ep for k in ("premier league", "nfl", "mlb", "nba", " vs. ", " at ")) and (
-        "football" in summary or "game" in summary or "soccer" in summary or "basketball" in summary or "baseball" in summary
-    ):
-        return True
-    return False
+    return bool(
+        any(k in ep for k in ("premier league", "nfl", "mlb", "nba", " vs. ", " at "))
+        and (
+            "football" in summary or "game" in summary or "soccer" in summary or "basketball" in summary or "baseball" in summary
+        )
+    )
+
 
 class RulesEngine:
+    """Evaluates series auto-recording rules against upcoming guide programs."""
+
     def __init__(self, config_mgr: ConfigManager, dbus_client: KaffeineDbusClient, guide_service: GuideService, queue_mgr: Optional[QueueManager] = None):
+        """Initializes the series rules engine with configuration and service references."""
         self.config_mgr = config_mgr
         self.dbus_client = dbus_client
         self.guide_service = guide_service
         self.queue_mgr = queue_mgr or QueueManager()
 
     def get_rules(self) -> List[Dict[str, Any]]:
+        """Retrieves the list of configured series recording rules."""
         return self.config_mgr.rules
 
     def add_rule(self, title_keyword: str, channel: str = "All", buffer_mins: Optional[int] = None, protected: bool = False) -> Dict[str, Any]:
+        """Creates and persists a new series auto-recording rule."""
         rules = self.config_mgr.rules
         rule = {
             "id": str(uuid.uuid4())[:8],
@@ -62,10 +70,12 @@ class RulesEngine:
         return rule
 
     def remove_rule(self, rule_id: str):
+        """Removes a series auto-recording rule by identifier."""
         rules = [r for r in self.config_mgr.rules if r.get("id") != rule_id]
         self.config_mgr.rules = rules
 
     def update_rule(self, rule_id: str, title_keyword: str, channel: str = "All", enabled: bool = True, buffer_mins: Optional[int] = None, protected: bool = False) -> bool:
+        """Updates parameters of an existing series auto-recording rule."""
         rules = self.config_mgr.rules
         found = False
         for r in rules:
@@ -82,6 +92,7 @@ class RulesEngine:
         return found
 
     def toggle_rule(self, rule_id: str, enabled: bool):
+        """Enables or disables an existing series auto-recording rule."""
         rules = self.config_mgr.rules
         for r in rules:
             if r.get("id") == rule_id:

@@ -20,6 +20,7 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
 def parse_version_tuple(ver_str: str) -> Tuple[int, ...]:
+    """Parses a version string into a numeric tuple of integers (e.g. '0.9.1' -> (0, 9, 1))."""
     clean = re.sub(r"^[^\d]*", "", str(ver_str).strip())
     parts = []
     for part in clean.split("."):
@@ -34,6 +35,7 @@ def parse_version_tuple(ver_str: str) -> Tuple[int, ...]:
 
 
 def is_newer_version(latest: str, current: str) -> bool:
+    """Returns True if the latest version string represents a higher version than current."""
     try:
         return parse_version_tuple(latest) > parse_version_tuple(current)
     except Exception:
@@ -65,6 +67,7 @@ def is_watcher_service_active() -> bool:
 
 
 def get_install_info() -> Dict[str, Any]:
+    """Gathers installation metadata including git origin and background service status."""
     repo_root = get_repo_root()
     return {
         "current_version": __version__,
@@ -75,6 +78,7 @@ def get_install_info() -> Dict[str, Any]:
 
 
 def get_pip_flags() -> list:
+    """Returns pip installation command flags suitable for the host Python environment."""
     flags = ["--user"]
     try:
         res = subprocess.run(
@@ -266,6 +270,7 @@ def get_local_release_notes(version: Optional[str] = None) -> str:
 
 
 def is_editable_install() -> bool:
+    """Checks whether the package is installed in pip editable mode."""
     try:
         res = subprocess.run(
             [sys.executable, "-m", "pip", "show", "kaffeine-dvr"],
@@ -452,7 +457,7 @@ def apply_update(progress_cb: Optional[Callable[[str], None]] = None) -> Tuple[b
 
         return True, "Update applied successfully."
     except subprocess.CalledProcessError as e:
-        err = e.stderr if e.stderr else str(e)
+        err = e.stderr or str(e)
         return False, f"Update command failed: {err}"
     except Exception as e:
         return False, f"Failed to apply update: {e!s}"

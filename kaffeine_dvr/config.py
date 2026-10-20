@@ -99,7 +99,7 @@ def compute_past_theme_colors(grid_bg_hex: str, text_primary_hex: Optional[str] 
 
     def to_hex(h_val, l_val, s_val):
         rgb = colorsys.hls_to_rgb(h_val, max(0.0, min(1.0, l_val)), max(0.0, min(1.0, s_val)))
-        return f"#{int(round(rgb[0]*255)):02x}{int(round(rgb[1]*255)):02x}{int(round(rgb[2]*255)):02x}"
+        return f"#{round(rgb[0]*255):02x}{round(rgb[1]*255):02x}{round(rgb[2]*255):02x}"
 
     past_bg = to_hex(h, l_past, s_past)
     past_bg_alt = to_hex(h, l_past_alt, s_past)
@@ -827,12 +827,12 @@ class ConfigManager:
                 return v
 
         # 3. Exact value match (already a tuned channel name)
-        for k, v in cmap.items():
+        for v in cmap.values():
             if v.strip() == raw:
                 return v
 
         # 4. Case-insensitive value match
-        for k, v in cmap.items():
+        for v in cmap.values():
             if v.strip().upper() == raw_upper:
                 return v
 
@@ -1221,11 +1221,11 @@ class ConfigManager:
         """
         national_keys = {"FOX", "CBS", "NBC", "ABC"}
         scanned = self.get_scanned_kaffeine_channels()
-        configured_passport = {k.strip().upper() for k in self.tvpassport_stations.keys()}
+        configured_passport = {k.strip().upper() for k in self.tvpassport_stations}
         dismissed = {d.strip().upper() for d in self.dismissed_regional_channels}
 
         # Determine active channels currently in the user's lineup
-        active_lineup = {k.strip().upper() for k in self.channel_map.keys()} | {v.strip().upper() for v in self.channel_map.values()}
+        active_lineup = {k.strip().upper() for k in self.channel_map} | {v.strip().upper() for v in self.channel_map.values()}
 
         # Build reverse lookup of channel aliases from channel_map
         # e.g., if "KPHO" is mapped to "CBS" or vice-versa

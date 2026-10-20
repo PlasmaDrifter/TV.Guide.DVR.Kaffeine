@@ -276,6 +276,7 @@ class ChannelSignalScanWorker(QThread):
         lock_timeout_sec: float = 1.8,
         parent: Optional[QObject] = None,
     ):
+        """Initializes the background channel scanner worker thread."""
         super().__init__(parent)
         self.channels = channels
         self.frontend_path = frontend_path
@@ -287,6 +288,7 @@ class ChannelSignalScanWorker(QThread):
         self._stop_requested = True
 
     def run(self):
+        """Executes sequential channel hardware signal polling across the lineup."""
         if not self.channels:
             self.scan_finished.emit({})
             return

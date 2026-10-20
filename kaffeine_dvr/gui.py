@@ -1639,7 +1639,7 @@ class ChannelSignalHealthDialog(BaseFramelessDialog):
 
         ch_name = self._aim_channel.get("name", "") if self._aim_channel else ""
         self.aim_title.setText(f"<b>Live Antenna Adjuster — {ch_name}</b>")
-        self.aim_strength_bar.setValue(int(round(pct)))
+        self.aim_strength_bar.setValue(round(pct))
         self.aim_snr_lbl.setText(f"SNR: {snr:.1f} dB")
         self.aim_peak_lbl.setText(f"Peak: {self._aim_peak_strength:.1f}%")
         self.aim_ber_lbl.setText(f"BER: {ber}")
@@ -4259,9 +4259,7 @@ class GridPanFilter(QObject):
                 self._drag_start_pos = pos
                 self._last_drag_pos = pos
                 # Consume press on the table viewport so table doesn't highlight/select cell on grab
-                if watched is vp:
-                    return True
-                return False
+                return watched is vp
             elif self._dragging:
                 return True
 
@@ -7574,7 +7572,7 @@ class MainWindow(QMainWindow):
             lines_html.append(f"<span style='color: {dot_color}; font-weight: bold;'>●</span> {html.escape(k)} = {html.escape(v)}")
 
         scale = getattr(self.config_mgr, "settings_ui_scale", 100) if self.config_mgr else 100
-        mono_sz = max(11, int(round(13 * (scale / 100.0))))
+        mono_sz = max(11, round(13 * (scale / 100.0)))
         html_content = f"<div style='font-family: monospace; font-size: {mono_sz}px; line-height: 1.6;'>" + "<br>".join(lines_html) + "</div>"
         self.mapping_text.setHtml(html_content)
 
@@ -8388,7 +8386,7 @@ class MainWindow(QMainWindow):
         self.guide_auto_advance_interval_combo.setFixedWidth(120)
         cur_adv_interval = getattr(self.config_mgr, "guide_auto_advance_interval", 1)
         int_idx = self.guide_auto_advance_interval_combo.findData(cur_adv_interval)
-        self.guide_auto_advance_interval_combo.setCurrentIndex(int_idx if int_idx >= 0 else 0)
+        self.guide_auto_advance_interval_combo.setCurrentIndex(max(int_idx, 0))
         self.guide_auto_advance_interval_combo.currentIndexChanged.connect(self._on_guide_auto_advance_interval_changed)
         auto_adv_layout.addWidget(self.guide_auto_advance_interval_combo)
 
@@ -10171,7 +10169,7 @@ class MainWindow(QMainWindow):
 
     def update_tvpassport_notice(self):
         scale = getattr(self.config_mgr, "settings_ui_scale", 100) if self.config_mgr else 100
-        pass_sz = max(11, int(round(13 * (scale / 100.0))))
+        pass_sz = max(11, round(13 * (scale / 100.0)))
         unconfigured = self.config_mgr.get_unconfigured_regional_channels()
         if unconfigured:
             ch_list_str = ", ".join(unconfigured)
@@ -10209,7 +10207,7 @@ class MainWindow(QMainWindow):
             return
         cur_dismissed = set(self.config_mgr.dismissed_regional_channels)
         cur_dismissed.update(unconfigured)
-        self.config_mgr.dismissed_regional_channels = sorted(list(cur_dismissed))
+        self.config_mgr.dismissed_regional_channels = sorted(cur_dismissed)
         self.update_tvpassport_notice()
         self.flash_save_indicator("Warnings Cleared")
 
@@ -10267,7 +10265,7 @@ class MainWindow(QMainWindow):
         cur_order = self.config_mgr.channel_order
         updated_order = [ch for ch in cur_order if ch in new_channels]
         # Append any newly added channels to channel_order if not already present
-        for k in new_map.keys():
+        for k in new_map:
             v = new_map[k]
             if k not in updated_order and v not in updated_order:
                 updated_order.append(k)
@@ -10280,8 +10278,7 @@ class MainWindow(QMainWindow):
             # Clean up tvpassport stations for removed channels
             cur_passport = dict(self.config_mgr.tvpassport_stations)
             for r_ch in removed_channels:
-                if r_ch in cur_passport:
-                    del cur_passport[r_ch]
+                cur_passport.pop(r_ch, None)
             self.config_mgr.tvpassport_stations = cur_passport
             # Delete cached database records for removed channels
             self.guide_service.delete_channel_programs(list(removed_channels))
@@ -10315,7 +10312,7 @@ class MainWindow(QMainWindow):
 
         new_valid = set(current_map.keys()) | set(current_map.values())
         updated_order = [ch for ch in self.config_mgr.channel_order if ch in new_valid]
-        for ch_name in current_map.keys():
+        for ch_name in current_map:
             if ch_name not in updated_order:
                 updated_order.append(ch_name)
 
@@ -10951,15 +10948,15 @@ class MainWindow(QMainWindow):
             scale_percent = getattr(self.config_mgr, "settings_ui_scale", 100) if self.config_mgr else 100
         f = max(90, min(180, int(scale_percent))) / 100.0
 
-        lbl_sz = max(11, int(round(13 * f)))
-        grp_sz = max(12, int(round(15 * f)))
-        tab_sz = max(10, int(round(12 * f)))
-        btn_sz = max(10, int(round(12 * f)))
-        h1_sz = max(16, int(round(20 * f)))
-        body_sz = max(12, int(round(14 * f)))
-        input_sz = max(11, int(round(13 * f)))
-        tab_pad_v = max(4, int(round(6 * f)))
-        tab_pad_h = max(12, int(round(18 * f)))
+        lbl_sz = max(11, round(13 * f))
+        grp_sz = max(12, round(15 * f))
+        tab_sz = max(10, round(12 * f))
+        btn_sz = max(10, round(12 * f))
+        h1_sz = max(16, round(20 * f))
+        body_sz = max(12, round(14 * f))
+        input_sz = max(11, round(13 * f))
+        tab_pad_v = max(4, round(6 * f))
+        tab_pad_h = max(12, round(18 * f))
 
         settings_css = f"""
             QTabWidget#settingsSubTabs > QTabBar::tab {{
@@ -13461,7 +13458,7 @@ class MainWindow(QMainWindow):
         self._refresh_day_nav_styles()
 
         self.day_nav_buttons = []
-        for i in range(7):
+        for _ in range(7):
             btn = QPushButton()
             btn.setFixedHeight(44)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -15320,7 +15317,7 @@ class MainWindow(QMainWindow):
                 return
 
         if elapsed < timeout_secs:
-            rem_secs = max(1, int(round(timeout_secs - elapsed)))
+            rem_secs = max(1, round(timeout_secs - elapsed))
             self.status_bar.showMessage(f"Buffering stream on {ch}... ({rem_secs}s remaining)", 1000)
             if hasattr(self, "_timeshift_buffer_timer") and self._timeshift_buffer_timer:
                 self._timeshift_buffer_timer.stop()
@@ -15428,7 +15425,7 @@ class MainWindow(QMainWindow):
 
             self.status_bar.showMessage(f"Weak or no signal on {ch}. Tuner released.", 5000)
 
-            secs_display = int(round(timeout_secs))
+            secs_display = round(timeout_secs)
             QMessageBox.warning(
                 self,
                 "Weak or No Signal",
@@ -16573,7 +16570,7 @@ def ensure_desktop_launcher():
         if not needs_write:
             try:
                 curr = desktop_file.read_text(encoding="utf-8")
-                if "Icon=kaffeine\n" in curr or "Icon=kaffeine" == curr.strip():
+                if "Icon=kaffeine\n" in curr or curr.strip() == "Icon=kaffeine":
                     needs_write = True
             except Exception:
                 needs_write = True

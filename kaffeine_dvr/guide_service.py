@@ -46,6 +46,7 @@ def get_program_duration_mins(prog: Optional[Dict[str, Any]]) -> int:
 
 
 def parse_xmltv_datetime(dt_str: str) -> Optional[datetime]:
+    """Parses XMLTV date/time strings with optional timezones into a Python datetime object."""
     if not dt_str:
         return None
     dt_str = dt_str.strip()
@@ -106,10 +107,13 @@ def match_channel_alias(net_or_ch: Optional[str], channel_map: Dict[str, str]) -
 
 
 class TVMazeProvider:
+    """Fetches free daily television schedule listings from the TVMaze REST API."""
+
     USER_AGENT = "KaffeineDVR/1.0 (Linux; x86_64)"
 
     @classmethod
     def check_health(cls, country: str = "US") -> Dict[str, Any]:
+        """Checks connection health and latency to the TVMaze schedule endpoint."""
         today_str = date.today().strftime("%Y-%m-%d")
         url = f"https://api.tvmaze.com/schedule?country={country}&date={today_str}"
         headers = {"User-Agent": cls.USER_AGENT}
@@ -153,6 +157,7 @@ class TVMazeProvider:
 
     @classmethod
     def fetch_day(cls, target_date: date, country: str, channel_map: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Fetches and normalizes a single day of schedule listings from TVMaze."""
         date_str = target_date.strftime("%Y-%m-%d")
         url = f"https://api.tvmaze.com/schedule?country={country}&date={date_str}"
         headers = {"User-Agent": cls.USER_AGENT}
@@ -218,6 +223,8 @@ class TVMazeProvider:
 
 
 class TVPassportProvider:
+    """Fetches station listings by scraping TV Passport HTML schedule tables."""
+
     USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
     _canonical_urls: Dict[str, str] = {}
 
@@ -252,6 +259,7 @@ class TVPassportProvider:
 
     @classmethod
     def check_health(cls, station_id: Optional[str] = None) -> Dict[str, Any]:
+        """Checks responsiveness of TV Passport station listings endpoint."""
         if not station_id or not station_id.strip():
             return {
                 "status": "Unconfigured",
@@ -295,6 +303,7 @@ class TVPassportProvider:
 
     @classmethod
     def fetch_station(cls, target_date: date, channel_alias: str, station_id: str) -> List[Dict[str, Any]]:
+        """Parses scheduled programs for a specific station from TV Passport."""
         date_str = target_date.strftime("%Y-%m-%d")
         base = cls._get_station_base_url(station_id.strip())
         url = f"{base}/{date_str}"
@@ -375,10 +384,13 @@ class TVPassportProvider:
 
 
 class XMLTVProvider:
+    """Parses standard XMLTV format guide feeds from local files or remote HTTP URLs."""
+
     USER_AGENT = "KaffeineDVR/1.0 (XMLTV Fetcher)"
 
     @classmethod
     def check_health(cls, path_or_url: str) -> Dict[str, Any]:
+        """Validates that a local XMLTV file or remote XMLTV URL is reachable and well-formed."""
         if not path_or_url or not path_or_url.strip():
             return {
                 "status": "Unconfigured",
@@ -457,6 +469,7 @@ class XMLTVProvider:
 
     @classmethod
     def fetch_programs(cls, path_or_url: str, channel_map: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Parses and ingests XMLTV guide program elements into normalized program records."""
         if not path_or_url or not path_or_url.strip():
             return []
 
@@ -557,11 +570,14 @@ class XMLTVProvider:
 
 
 class SchedulesDirectProvider:
+    """Authenticates and fetches EPG listings from the Schedules Direct JSON API service."""
+
     API_URL = "https://json.schedulesdirect.org/20141201"
     USER_AGENT = "KaffeineDVR/1.0 (Linux; x86_64)"
 
     @classmethod
     def check_health(cls, username: str, password_raw: str) -> Dict[str, Any]:
+        """Validates Schedules Direct credentials and API server availability."""
         if not username or not password_raw:
             return {
                 "status": "Unconfigured",
@@ -630,7 +646,10 @@ class SchedulesDirectProvider:
 
 
 class GuideService:
+    """Coordinates EPG data fetching, database caching, search indexing, and channel lineup mappings."""
+
     def __init__(self, data_dir: Optional[Path] = None, channel_map: Optional[Dict[str, str]] = None, config_mgr: Optional[ConfigManager] = None):
+        """Initializes SQLite guide database cache and loads channel lineup mappings."""
         self.data_dir = data_dir or (Path.home() / ".local" / "share" / "kaffeine-dvr")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "guide_cache.sqlite"
@@ -639,6 +658,7 @@ class GuideService:
         self._init_db()
 
     def set_channel_map(self, channel_map: Dict[str, str]):
+        """Updates the active in-memory guide channel-to-tuner mapping."""
         self.channel_map = channel_map
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -787,10 +807,12 @@ class GuideService:
         return count
 
     def test_schedules_direct_login(self, username: str, password_raw: str) -> Tuple[bool, str]:
+        """Tests Schedules Direct credentials and returns a status tuple (success, message)."""
         health = SchedulesDirectProvider.check_health(username, password_raw)
         return (health["status"] == "Online", health["details"])
 
     def test_xmltv_source(self, path_or_url: str) -> Tuple[bool, str]:
+        """Tests an XMLTV file or URL source and returns a status tuple (success, message)."""
         health = XMLTVProvider.check_health(path_or_url)
         return (health["status"] == "Online", health["details"])
 
@@ -859,7 +881,7 @@ class GuideService:
         else:
             # Default "hybrid": TVMaze for unconfigured national networks + TV Passport for configured stations
             passport_stations = self.config_mgr.tvpassport_stations
-            passport_channel_names = {k.strip().lower() for k in passport_stations.keys()}
+            passport_channel_names = {k.strip().lower() for k in passport_stations}
 
             # Exclude channels from TVMaze if they are already handled by TV Passport
             tvmaze_map = {
@@ -949,6 +971,7 @@ class GuideService:
         trim_ended: bool = True,
         include_overhang: bool = False
     ) -> List[Dict[str, Any]]:
+        """Queries cached guide programs with title filtering, channel scoping, and date constraints."""
         conn = self._get_connection()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()

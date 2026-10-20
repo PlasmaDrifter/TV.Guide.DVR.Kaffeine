@@ -46,6 +46,8 @@ def send_desktop_notification(title: str, channel: str, start_display: str, lead
         print(f"Error sending desktop notification: {e}", flush=True)
 
 class Watcher:
+    """Background watcher daemon that monitors recording schedules, manages tuner state, and dispatches timers."""
+
     def __init__(
         self,
         dbus_client: Optional[KaffeineDbusClient] = None,
@@ -53,6 +55,7 @@ class Watcher:
         storage_mgr: Optional[StorageManager] = None,
         config_mgr: Optional[ConfigManager] = None,
     ):
+        """Initializes the background watcher service with required management interfaces."""
         self.config_mgr = config_mgr or ConfigManager()
         self.dbus_client = dbus_client or KaffeineDbusClient()
         self.queue_mgr = queue_mgr or QueueManager()
@@ -503,6 +506,7 @@ class Watcher:
         return recovered_count
 
     def check_and_dispatch(self, notify: bool = True) -> int:
+        """Evaluates due recordings, resolves conflict buffers, and arms upcoming timers in Kaffeine."""
         self.reap_children()
         if hasattr(self.config_mgr, "reload_if_changed"):
             self.config_mgr.reload_if_changed()
@@ -667,6 +671,7 @@ class Watcher:
         return max(5, default_interval)
 
     def run_loop(self, interval_seconds: int = 120):
+        """Runs the main background dispatch loop until stopped."""
         print(f"Kaffeine DVR Watcher running (check interval: {interval_seconds}s).", flush=True)
         # Run an initial guide & rules check on daemon startup
         self.check_periodic_sync()

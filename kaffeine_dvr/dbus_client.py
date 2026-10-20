@@ -135,7 +135,10 @@ def resolve_system_default_player_command(file_path: str) -> Optional[List[str]]
 
 
 class KaffeineDbusClient:
+    """Manages D-Bus and process interactions with Kaffeine media player and ATSC tuners."""
+
     def __init__(self, kaffeine_db_path: Optional[Path] = None):
+        """Initializes D-Bus client with connection paths and database location."""
         self.kaffeine_db_path = kaffeine_db_path or (Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db")
         self.service_name = "org.mpris.kaffeine"
         self.object_path = "/Television"

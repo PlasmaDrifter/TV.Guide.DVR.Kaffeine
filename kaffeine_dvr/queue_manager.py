@@ -18,16 +18,20 @@ class ActiveScheduledMap(dict):
     as well as interval-based smart fallback lookup for delayed shows.
     """
     def __init__(self, *args, **kwargs):
+        """Initializes the active recording fast-lookup cache."""
         super().__init__(*args, **kwargs)
         self._recordings: List[Dict[str, Any]] = []
 
     def add_recording(self, r: Dict[str, Any]):
+        """Adds a recording record to the fast-lookup cache."""
         self._recordings.append(r)
 
     def get_recordings(self) -> List[Dict[str, Any]]:
+        """Returns the list of active recording dictionaries."""
         return self._recordings
 
     def find_recording_for_program(self, prog: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Looks up a scheduled or active recording matching the given program."""
         if not prog:
             return None
         ch_key = (prog.get("kaffeine_channel") or prog.get("channel") or "").strip().lower()
@@ -98,7 +102,10 @@ class ActiveScheduledMap(dict):
 
 
 class QueueManager:
+    """Manages the SQLite recording queue, recording execution state, and timer dispatch."""
+
     def __init__(self, data_dir: Optional[Path] = None):
+        """Initializes SQLite recording queue database and tables."""
         self.data_dir = data_dir or (Path.home() / ".local" / "share" / "kaffeine-dvr")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.data_dir / "recordings_queue.sqlite"
@@ -199,6 +206,7 @@ class QueueManager:
         original_start_iso: Optional[str] = None,
         protected: bool = False
     ) -> int:
+        """Adds a scheduled broadcast or timeshift recording to the queue database."""
         orig_start = original_start_iso or start_iso
         # Calculate end_iso and buffered duration
         try:
@@ -595,6 +603,7 @@ class QueueManager:
             return False
 
     def list_queue(self, include_completed: bool = False) -> List[Dict[str, Any]]:
+        """Returns recordings from the SQLite queue, optionally including recent completed items."""
         conn = self._get_connection()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -1014,6 +1023,7 @@ class QueueManager:
         return due
 
     def mark_armed(self, queue_id: int, kaffeine_key: int):
+        """Updates a recording status to ARMED and associates its native Kaffeine timer key."""
         conn = self._get_connection()
         cur = conn.cursor()
         cur.execute("UPDATE recording_queue SET status = 'ARMED', kaffeine_key = ? WHERE id = ?", (kaffeine_key, queue_id))

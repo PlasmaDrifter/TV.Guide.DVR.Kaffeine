@@ -44,6 +44,7 @@ from PyQt6.QtGui import (
     QKeyEvent,
     QKeySequence,
     QPainter,
+    QPainterPath,
     QPalette,
     QPen,
     QPixmap,
@@ -11147,38 +11148,43 @@ class MainWindow(QMainWindow):
         """Applies a full application shell theme dynamically to the running Qt application."""
         if theme_key not in APP_THEMES:
             return
-        self.config_mgr.apply_app_theme(theme_key)
-        app_inst = QApplication.instance()
-        if app_inst:
-            setup_dark_theme(app_inst, theme_key, force=True)
 
-        tokens = APP_THEMES[theme_key]
-        if hasattr(self, "_refresh_day_nav_styles"):
-            self._refresh_day_nav_styles()
-        if hasattr(self, "_update_day_nav_bar"):
-            self._update_day_nav_bar(sync_week_with_selection=False)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.config_mgr.apply_app_theme(theme_key)
+            app_inst = QApplication.instance()
+            if app_inst:
+                setup_dark_theme(app_inst, theme_key, force=True)
 
-        # Update dynamic icons to match new theme
-        if hasattr(self, "day_nav_prev_btn") and self.day_nav_prev_btn:
-            self.day_nav_prev_btn.setIcon(self._create_nav_arrow_icon("left", tokens.get("text_primary")))
-        if hasattr(self, "day_nav_next_btn") and self.day_nav_next_btn:
-            self.day_nav_next_btn.setIcon(self._create_nav_arrow_icon("right", tokens.get("text_primary")))
-        if hasattr(self, "guide_refresh_btn") and self.guide_refresh_btn:
-            self.guide_refresh_btn.setIcon(self._create_guide_refresh_icon(tokens.get("text_primary")))
-        if hasattr(self, "header_restore_btn") and self.header_restore_btn:
-            self.header_restore_btn.setIcon(self._create_restore_window_icon(tokens.get("accent_hover")))
-        if hasattr(self, "guide_maximize_btn") and self.guide_maximize_btn:
-            if getattr(self, "_guide_maximized", False):
-                self.guide_maximize_btn.setIcon(self._create_guide_restore_icon(tokens.get("accent_primary")))
-            else:
-                self.guide_maximize_btn.setIcon(self._create_guide_maximize_icon(tokens.get("accent_primary")))
-        if hasattr(self, "save_theme_preset_btn") and self.save_theme_preset_btn:
-            self.save_theme_preset_btn.setIcon(self._create_save_theme_icon(tokens.get("accent_hover")))
-        if hasattr(self, "reset_cat_colors_btn") and self.reset_cat_colors_btn:
-            self.reset_cat_colors_btn.setIcon(self._create_defaults_theme_icon(tokens.get("accent_primary")))
+            tokens = APP_THEMES[theme_key]
+            if hasattr(self, "_refresh_day_nav_styles"):
+                self._refresh_day_nav_styles()
+            if hasattr(self, "_update_day_nav_bar"):
+                self._update_day_nav_bar(sync_week_with_selection=False)
 
-        self._apply_settings_ui_scale()
-        self.flash_save_indicator(f"App Theme: {tokens['name']}")
+            # Update dynamic icons to match new theme
+            if hasattr(self, "day_nav_prev_btn") and self.day_nav_prev_btn:
+                self.day_nav_prev_btn.setIcon(self._create_nav_arrow_icon("left", tokens.get("text_primary")))
+            if hasattr(self, "day_nav_next_btn") and self.day_nav_next_btn:
+                self.day_nav_next_btn.setIcon(self._create_nav_arrow_icon("right", tokens.get("text_primary")))
+            if hasattr(self, "guide_refresh_btn") and self.guide_refresh_btn:
+                self.guide_refresh_btn.setIcon(self._create_guide_refresh_icon(tokens.get("text_primary")))
+            if hasattr(self, "header_restore_btn") and self.header_restore_btn:
+                self.header_restore_btn.setIcon(self._create_restore_window_icon(tokens.get("accent_hover")))
+            if hasattr(self, "guide_maximize_btn") and self.guide_maximize_btn:
+                if getattr(self, "_guide_maximized", False):
+                    self.guide_maximize_btn.setIcon(self._create_guide_restore_icon(tokens.get("accent_primary")))
+                else:
+                    self.guide_maximize_btn.setIcon(self._create_guide_maximize_icon(tokens.get("accent_primary")))
+            if hasattr(self, "save_theme_preset_btn") and self.save_theme_preset_btn:
+                self.save_theme_preset_btn.setIcon(self._create_save_theme_icon(tokens.get("accent_hover")))
+            if hasattr(self, "reset_cat_colors_btn") and self.reset_cat_colors_btn:
+                self.reset_cat_colors_btn.setIcon(self._create_defaults_theme_icon(tokens.get("accent_primary")))
+
+            self._apply_settings_ui_scale()
+            self.flash_save_indicator(f"App Theme: {tokens['name']}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def _build_app_theme_chips(self):
         if not hasattr(self, "app_theme_grid"):
@@ -11274,7 +11280,7 @@ class MainWindow(QMainWindow):
         self.theme_preset_combo.clear()
 
         cur_preset = getattr(self.config_mgr, "theme_preset", "midnight") if self.config_mgr else "midnight"
-        chip_w = 165
+        chip_w = get_theme_chip_fixed_width(self.font())
         num_cols = 2
 
         # 1. Built-in presets in guide_theme_grid (alphabetical order by display name)
@@ -11287,24 +11293,24 @@ class MainWindow(QMainWindow):
             self.guide_theme_grid.addWidget(chip, slot_idx // num_cols, slot_idx % num_cols, Qt.AlignmentFlag.AlignLeft)
             self._guide_theme_chips[p_key] = chip
 
-        # 2. Custom (save up to 6) pill permanently anchors row 0, centered across columns 0 and 1
+        # 2. Custom (save up to 8) pill permanently anchors row 0, centered across columns 0 and 1
         custom_anchor_w = 200
         custom_saved_w = 100
         del_btn_w = 20
         del_spacing = 3
         cell_w = custom_saved_w + del_spacing + del_btn_w
         target_custom_grid = self.guide_custom_grid if hasattr(self, "guide_custom_grid") else self.guide_theme_grid
-        self.theme_preset_combo.addItem("Custom (save up to 6)", "custom")
+        self.theme_preset_combo.addItem("Custom (save up to 8)", "custom")
         cur_colors = self.config_mgr.category_colors if self.config_mgr else DEFAULT_CATEGORY_COLORS
         custom_dot = cur_colors.get("highlight", cur_colors.get("sports", "#ffa028"))
-        custom_chip = ThemeChip("custom", "Custom (save up to 6)", custom_dot, parent=self, fixed_width=custom_anchor_w)
+        custom_chip = ThemeChip("custom", "Custom (save up to 8)", custom_dot, parent=self, fixed_width=custom_anchor_w)
         custom_chip.chip_clicked.connect(self.select_guide_theme)
         target_custom_grid.addWidget(custom_chip, 0, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
         self._guide_theme_chips["custom"] = custom_chip
 
-        # 3. Saved custom presets (max 6) arranged side-by-side in 2 columns under Custom with dedicated delete trash icon
+        # 3. Saved custom presets (max 8) arranged side-by-side in 2 columns under Custom with dedicated delete trash icon
         custom_presets = self.config_mgr.custom_theme_presets if self.config_mgr else {}
-        custom_sorted = sorted(custom_presets.items(), key=lambda x: x[1]["name"].lower())[:6]
+        custom_sorted = sorted(custom_presets.items(), key=lambda x: x[1]["name"].lower())[:8]
         for idx, (p_key, p_info) in enumerate(custom_sorted):
             row_idx = 1 + (idx // 2)
             col_idx = idx % 2

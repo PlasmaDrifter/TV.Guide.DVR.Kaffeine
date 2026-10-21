@@ -110,28 +110,28 @@ def test_custom_theme_presets_limit_and_overwrite(isolated_config: ConfigManager
     cfg = isolated_config
     assert len(cfg.custom_theme_presets) == 0
 
-    # Save 6 custom themes
-    keys = [cfg.save_custom_theme_preset(f"Theme {i}") for i in range(1, 7)]
+    # Save 8 custom themes
+    keys = [cfg.save_custom_theme_preset(f"Theme {i}") for i in range(1, 9)]
     k1, k2 = keys[0], keys[1]
-    assert len(cfg.custom_theme_presets) == 6
+    assert len(cfg.custom_theme_presets) == 8
 
-    # Attempting to save a 7th should raise ValueError
+    # Attempting to save a 9th should raise ValueError
     import pytest
-    with pytest.raises(ValueError, match="Maximum limit of 6"):
-        cfg.save_custom_theme_preset("Theme 7")
+    with pytest.raises(ValueError, match="Maximum limit of 8"):
+        cfg.save_custom_theme_preset("Theme 9")
 
-    # Overwriting an existing key replaces it and preserves the 6 limit
-    k7 = cfg.save_custom_theme_preset("Theme 7 Overwrite", overwrite_key=k1)
-    assert len(cfg.custom_theme_presets) == 6
+    # Overwriting an existing key replaces it and preserves the 8 limit
+    k9 = cfg.save_custom_theme_preset("Theme 9 Overwrite", overwrite_key=k1)
+    assert len(cfg.custom_theme_presets) == 8
     assert k1 not in cfg.custom_theme_presets
-    assert k7 in cfg.custom_theme_presets
-    assert cfg.custom_theme_presets[k7]["name"] == "Theme 7 Overwrite"
+    assert k9 in cfg.custom_theme_presets
+    assert cfg.custom_theme_presets[k9]["name"] == "Theme 9 Overwrite"
 
     # Deleting allows adding a new one
     cfg.delete_custom_theme_preset(k2)
-    assert len(cfg.custom_theme_presets) == 5
-    cfg.save_custom_theme_preset("Theme 8")
-    assert len(cfg.custom_theme_presets) == 6
+    assert len(cfg.custom_theme_presets) == 7
+    cfg.save_custom_theme_preset("Theme 10")
+    assert len(cfg.custom_theme_presets) == 8
 
 
 def test_unconfigured_regional_channels_respects_lineup_and_dismissal(isolated_config: ConfigManager, monkeypatch):

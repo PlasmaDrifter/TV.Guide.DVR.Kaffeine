@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
+from kaffeine_dvr.config import APP_THEMES, THEME_PRESETS
 from kaffeine_dvr.gui import MainWindow, NumberStepper
 
 
@@ -1607,5 +1608,39 @@ def test_rules_tab_matched_shows_drawer(qtbot, isolated_config):
     win.remove_selected_rule()
     assert win.rules_table.rowCount() == 0
     assert len(win.queue_mgr.list_queue()) == 0
+
+
+def test_theme_additions_and_switching(qtbot, isolated_config):
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    # 1. Verify 10 built-in themes exist in APP_THEMES and THEME_PRESETS
+    assert "nord" in APP_THEMES
+    assert "tokyo_night" in APP_THEMES
+    assert len(APP_THEMES) == 10
+
+    assert "nord" in THEME_PRESETS
+    assert "tokyo_night" in THEME_PRESETS
+    assert len(THEME_PRESETS) == 10
+
+    # 2. Test applying Nord and Tokyo Night app themes
+    win.apply_app_theme("nord")
+    assert win.config_mgr.app_theme == "nord"
+
+    win.apply_app_theme("tokyo_night")
+    assert win.config_mgr.app_theme == "tokyo_night"
+
+    # 3. Verify settings tab theme chip counts and sorting
+    win.tabs.setCurrentIndex(2)  # Settings tab
+    win._build_app_theme_chips()
+    win._populate_theme_preset_combo()
+
+    assert len(win._app_theme_chips) == 10
+    # Built-in guide themes (10) + "custom" anchor chip
+    assert "nord" in win._guide_theme_chips
+    assert "tokyo_night" in win._guide_theme_chips
+    assert "custom" in win._guide_theme_chips
+    assert win.theme_preset_combo.findText("Custom (save up to 8)") != -1
+
 
 

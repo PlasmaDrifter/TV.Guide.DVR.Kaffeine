@@ -2,6 +2,10 @@
 
 ## v0.9.2
 
+- **Nord & Tokyo Night Built-In Themes**: Expanded both Application Shell Themes and Guide Grid Presets to 10 built-in options with the addition of **Nord** (Arctic slate with frost teal accents and polar night past shading) and **Tokyo Night** (modern midnight navy with electric blue/magenta accents and deep past broadcast shading).
+- **Balanced 5x2 Alphabetical Layout**: Both Application Themes and Guide Grid Themes now sort alphabetically by display name, creating an evenly balanced 5 rows × 2 columns layout.
+- **Expanded Custom Themes (Up to 8 Presets)**: Increased custom grid theme storage capacity from 6 to 8 saved presets, arranging custom user themes into an even 4 rows × 2 columns grid.
+- **Responsive Cursor Feedback**: Enhanced theme switching with a native system wait/busy cursor during stylesheet generation and repainting.
 - **Collapsible Caught Shows Drawer in Auto-Record Rules**: Added an interactive collapsible detail drawer to the Auto-Record Rules tab dynamically displaying upcoming broadcasts in the cached guide matched by each rule. The drawer includes show/episode title, channel, air date/time, duration, applied end buffer (with sports detection), and live DVR queue status (Queued, Armed, Recording, Not Queued). Double-clicking any show opens its program details and scheduling options dialog.
 - **Auto-Record Rules Match Counter & Header Migration**: Added a dedicated "Matches" column to the Auto-Record Rules table showing the upcoming match count for each rule (e.g. "2 upcoming"). Integrated automatic header state version migration so existing user configurations update seamlessly without column clipping.
 - **Splitter Handle Locking on Collapse**: When the caught shows drawer is collapsed, the vertical splitter handle is locked and the container height is constrained to the header bar, preventing the drawer from creating empty gaps or getting misaligned when grabbed.

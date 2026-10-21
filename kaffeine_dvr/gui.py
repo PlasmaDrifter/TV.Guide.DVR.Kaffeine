@@ -1095,9 +1095,11 @@ class ManualRecordDialog(BaseFramelessDialog):
     def __init__(self, channels: List[str], parent=None, default_buffer_mins: int = 0):
         super().__init__(parent)
         self.setWindowTitle("Schedule Manual Recording")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(440)
         layout = QFormLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(12)
 
         header_lbl = QLabel("<b>Schedule Manual Recording</b>")
         header_lbl.setStyleSheet("font-size: 15px; color: #ffffff; margin-bottom: 6px;")
@@ -1111,12 +1113,13 @@ class ManualRecordDialog(BaseFramelessDialog):
         self.start_input = QLineEdit(now.strftime("%Y-%m-%dT%H:%M:00"))
         self.duration_input = QLineEdit("01:00:00")
 
-        self.buffer_spin = QSpinBox()
+        self.buffer_spin = NumberStepper()
         self.buffer_spin.setRange(0, 180)
+        self.buffer_spin.setSpecialValueText("0 (Auto / Default)")
+        self.buffer_spin.setSuffix(" min")
         self.buffer_spin.setValue(default_buffer_mins)
-        self.buffer_spin.setSuffix(" minutes")
 
-        self.protect_check = QCheckBox("Protect Recording (Keep Forever)")
+        self.protect_check = QCheckBox("Protect Recording")
         self.protect_check.setToolTip("Mark recording as protected so it is never purged or auto-deleted.")
 
         layout.addRow("Title:", self.title_input)
@@ -1141,9 +1144,11 @@ class AddRuleDialog(BaseFramelessDialog):
     def __init__(self, channels: List[str], parent=None, default_title: str = "", default_channel: str = "All"):
         super().__init__(parent)
         self.setWindowTitle("Add Auto-Record Rule")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(440)
         layout = QFormLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(12)
 
         header_lbl = QLabel("<b>Add Auto-Record Rule</b>")
         header_lbl.setStyleSheet("font-size: 15px; color: #ffffff; margin-bottom: 6px;")
@@ -1158,13 +1163,13 @@ class AddRuleDialog(BaseFramelessDialog):
             if idx >= 0:
                 self.channel_combo.setCurrentIndex(idx)
 
-        self.buffer_spin = QSpinBox()
+        self.buffer_spin = NumberStepper()
         self.buffer_spin.setRange(0, 180)
         self.buffer_spin.setSpecialValueText("0 (Auto / Default)")
         self.buffer_spin.setSuffix(" min")
         self.buffer_spin.setValue(0)
 
-        self.protect_check = QCheckBox("Protect Recordings (Keep Forever)")
+        self.protect_check = QCheckBox("Protect Recordings")
         self.protect_check.setToolTip("Mark all matching episodes as protected so they are never purged or auto-deleted.")
 
         layout.addRow("Show Keyword / Title:", self.keyword_input)
@@ -1187,9 +1192,11 @@ class EditRuleDialog(BaseFramelessDialog):
     def __init__(self, channels: List[str], rule_id: str, keyword: str, channel: str, enabled: bool, buffer_mins: Optional[int] = None, protected: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Auto-Record Rule")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(440)
         layout = QFormLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setHorizontalSpacing(14)
+        layout.setVerticalSpacing(12)
 
         header_lbl = QLabel("<b>Edit Auto-Record Rule</b>")
         header_lbl.setStyleSheet("font-size: 15px; color: #ffffff; margin-bottom: 6px;")
@@ -1206,13 +1213,13 @@ class EditRuleDialog(BaseFramelessDialog):
         else:
             self.channel_combo.setCurrentText(channel)
 
-        self.buffer_spin = QSpinBox()
+        self.buffer_spin = NumberStepper()
         self.buffer_spin.setRange(0, 180)
         self.buffer_spin.setSpecialValueText("0 (Auto / Default)")
         self.buffer_spin.setSuffix(" min")
         self.buffer_spin.setValue(buffer_mins if (buffer_mins is not None and buffer_mins > 0) else 0)
 
-        self.protect_check = QCheckBox("Protect Recordings (Keep Forever)")
+        self.protect_check = QCheckBox("Protect Recordings")
         self.protect_check.setChecked(bool(protected))
         self.protect_check.setToolTip("Mark all matching episodes as protected so they are never purged or auto-deleted.")
 
@@ -2200,7 +2207,7 @@ class AdjustBufferDialog(BaseFramelessDialog):
         form.addRow("Show:", self.title_lbl)
 
         # Spinbox
-        self.buf_spin = QSpinBox()
+        self.buf_spin = NumberStepper()
         self.buf_spin.setRange(0, 180)
         self.buf_spin.setValue(current_buffer)
         self.buf_spin.setSuffix(" minutes")

@@ -80,7 +80,7 @@ The AppImage is completely self-contained. **No Python, PyQt6, or package instal
 
 > **Prerequisite:** Kaffeine (`kaffeine`) must be installed on your system. While the AppImage bundles Python and all GUI dependencies, it interacts directly with your host Kaffeine installation to manage tuners, scan channels, and record broadcasts.
 
-- **Latest Available AppImage**: [Download TV.Guide.DVR.Kaffeine v0.9.1 AppImage](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases/tag/v0.9.1)
+- **Latest Available AppImage**: [Download TV.Guide.DVR.Kaffeine v0.9.2 AppImage](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases/tag/v0.9.2)
 - **All Releases & Source Code**: [View All GitHub Releases](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases)
 
 1. Download the AppImage file from the link above.

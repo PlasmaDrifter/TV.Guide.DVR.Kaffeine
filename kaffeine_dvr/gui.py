@@ -87,6 +87,7 @@ from PyQt6.QtWidgets import (
     QSizeGrip,
     QSizePolicy,
     QSlider,
+    QSplitter,
     QSpacerItem,
     QSpinBox,
     QStackedWidget,
@@ -6271,7 +6272,7 @@ class MainWindow(QMainWindow):
         self.dbus_client = KaffeineDbusClient()
         self.queue_mgr = QueueManager(data_dir=self.config_mgr.data_dir)
         self.guide_service = GuideService(data_dir=self.config_mgr.data_dir, channel_map=self.config_mgr.channel_map, config_mgr=self.config_mgr)
-        self.rules_engine = RulesEngine(self.config_mgr, self.dbus_client, self.guide_service)
+        self.rules_engine = RulesEngine(self.config_mgr, self.dbus_client, self.guide_service, queue_mgr=self.queue_mgr)
         self.watcher = Watcher(self.dbus_client, self.queue_mgr)
         self.storage_mgr = StorageManager(self.config_mgr, self.queue_mgr)
         self.day_nav_offset = 0
@@ -6967,23 +6968,33 @@ class MainWindow(QMainWindow):
         layout.addLayout(ctrl_bar)
 
         self.rules_table = QTableWidget()
-        self.rules_table.setColumnCount(6)
-        self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled"])
+        self.rules_table.setColumnCount(7)
+        self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled", "Matches"])
         rules_hdr = self.rules_table.horizontalHeader()
-        for i in range(6):
+        for i in range(7):
             rules_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         rules_hdr.setSectionsMovable(True)
         rules_hdr.setSortIndicatorShown(True)
         rules_hdr.setSectionsClickable(True)
-        saved_rules_hdr = self.settings.value("rules_table_header_state")
-        if saved_rules_hdr:
-            try:
-                rules_hdr.restoreState(saved_rules_hdr)
-            except Exception:
-                pass
-        if rules_hdr.count() != 6:
-            self.rules_table.setColumnCount(6)
-            self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled"])
+        saved_hdr_ver = self.settings.value("rules_table_header_version", 0, type=int)
+        CURRENT_RULES_HDR_VER = 2
+        saved_rules_hdr = None
+        if saved_hdr_ver == CURRENT_RULES_HDR_VER:
+            saved_rules_hdr = self.settings.value("rules_table_header_state")
+            if saved_rules_hdr:
+                try:
+                    rules_hdr.restoreState(saved_rules_hdr)
+                except Exception:
+                    saved_rules_hdr = None
+        else:
+            self.settings.remove("rules_table_header_state")
+            self.settings.setValue("rules_table_header_version", CURRENT_RULES_HDR_VER)
+
+        if rules_hdr.count() != 7:
+            self.rules_table.setColumnCount(7)
+            self.rules_table.setHorizontalHeaderLabels(["ID", "Title / Keyword", "Channel", "End Buffer", "Retain", "Enabled", "Matches"])
+            for i in range(7):
+                rules_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         if not saved_rules_hdr:
             rules_hdr.setSortIndicator(1, Qt.SortOrder.AscendingOrder)
         rules_hdr.sectionMoved.connect(self._save_rules_table_header_state)
@@ -6993,11 +7004,114 @@ class MainWindow(QMainWindow):
         self.rules_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rules_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.rules_table.itemDoubleClicked.connect(lambda item: self.edit_rule_dialog())
-        layout.addWidget(self.rules_table)
+        self.rules_table.itemSelectionChanged.connect(self._on_rule_selection_changed)
         self.rules_table_resize_filter = TableViewportResizeFilter(self._adjust_table_columns, self)
         self.rules_table.viewport().installEventFilter(self.rules_table_resize_filter)
         self.rules_table_toggle_filter = TableRowToggleFilter(self.rules_table, self)
         self.rules_table.viewport().installEventFilter(self.rules_table_toggle_filter)
+
+        # Matched shows collapsible container
+        self.matched_shows_container = QWidget()
+        matched_layout = QVBoxLayout(self.matched_shows_container)
+        matched_layout.setContentsMargins(0, 4, 0, 0)
+        matched_layout.setSpacing(4)
+
+        # Header bar with toggle
+        hdr_bar = QHBoxLayout()
+        hdr_bar.setContentsMargins(4, 2, 4, 2)
+
+        self.toggle_matched_pane_btn = QToolButton()
+        self.toggle_matched_pane_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle_matched_pane_btn.setArrowType(Qt.ArrowType.DownArrow)
+        self.toggle_matched_pane_btn.setText("Upcoming Shows Caught by Selected Rule")
+        self.toggle_matched_pane_btn.setStyleSheet("font-weight: bold; font-size: 13px; border: none; padding: 2px 4px;")
+        self.toggle_matched_pane_btn.clicked.connect(self.toggle_matched_shows_drawer)
+        hdr_bar.addWidget(self.toggle_matched_pane_btn)
+
+        self.matched_shows_title = QLabel("")
+        self.matched_shows_title.setStyleSheet("color: #a0aec0; font-size: 12px; margin-left: 8px;")
+        hdr_bar.addWidget(self.matched_shows_title)
+
+        hdr_bar.addStretch()
+
+        self.matched_shows_count_label = QLabel("")
+        self.matched_shows_count_label.setStyleSheet("color: #718096; font-size: 11px; margin-right: 8px;")
+        hdr_bar.addWidget(self.matched_shows_count_label)
+
+        self.refresh_matched_shows_btn = QPushButton("Refresh Matches")
+        self.refresh_matched_shows_btn.setToolTip("Re-query guide for shows matching the selected rule")
+        self.refresh_matched_shows_btn.clicked.connect(self._on_rule_selection_changed)
+        hdr_bar.addWidget(self.refresh_matched_shows_btn)
+
+        matched_layout.addLayout(hdr_bar)
+
+        self.matched_shows_table = QTableWidget()
+        self.matched_shows_table.setColumnCount(6)
+        self.matched_shows_table.setHorizontalHeaderLabels([
+            "Show / Episode Title", "Channel", "Air Date & Time", "Duration", "Applied Buffer", "DVR Status"
+        ])
+        m_hdr = self.matched_shows_table.horizontalHeader()
+        for i in range(6):
+            m_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        m_hdr.setSectionsMovable(True)
+        m_hdr.setSortIndicatorShown(True)
+        m_hdr.setSectionsClickable(True)
+        saved_m_hdr = self.settings.value("matched_shows_header_state")
+        if saved_m_hdr:
+            try:
+                m_hdr.restoreState(saved_m_hdr)
+            except Exception:
+                pass
+        if m_hdr.count() != 6:
+            self.matched_shows_table.setColumnCount(6)
+            self.matched_shows_table.setHorizontalHeaderLabels([
+                "Show / Episode Title", "Channel", "Air Date & Time", "Duration", "Applied Buffer", "DVR Status"
+            ])
+            for i in range(6):
+                m_hdr.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        if not saved_m_hdr:
+            m_hdr.setSortIndicator(2, Qt.SortOrder.AscendingOrder)
+        m_hdr.sectionMoved.connect(self._save_matched_shows_header_state)
+        m_hdr.sectionResized.connect(self._save_matched_shows_header_state)
+        m_hdr.sortIndicatorChanged.connect(self._save_matched_shows_header_state)
+
+        self.matched_shows_table.setSortingEnabled(True)
+        self.matched_shows_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.matched_shows_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.matched_shows_table.itemDoubleClicked.connect(self._on_matched_show_double_clicked)
+        matched_layout.addWidget(self.matched_shows_table, 1)
+
+        self.matched_shows_resize_filter = TableViewportResizeFilter(self._adjust_table_columns, self)
+        self.matched_shows_table.viewport().installEventFilter(self.matched_shows_resize_filter)
+
+        # Vertical Splitter
+        self.rules_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.rules_splitter.setObjectName("rulesSplitter")
+        self.rules_splitter.addWidget(self.rules_table)
+        self.rules_splitter.addWidget(self.matched_shows_container)
+        self.rules_splitter.setCollapsible(0, False)
+        self.rules_splitter.setCollapsible(1, False)
+
+        layout.addWidget(self.rules_splitter)
+
+        # Restore splitter state
+        is_collapsed = self.settings.value("rules_drawer_collapsed", False, type=bool)
+        if is_collapsed:
+            self.matched_shows_table.setVisible(False)
+            self.refresh_matched_shows_btn.setVisible(False)
+            self.toggle_matched_pane_btn.setArrowType(Qt.ArrowType.RightArrow)
+            self.toggle_matched_pane_btn.setText("Show Upcoming Matches")
+            QTimer.singleShot(0, self._apply_initial_collapsed_splitter)
+        else:
+            saved_splitter = self.settings.value("rules_splitter_sizes")
+            if saved_splitter:
+                try:
+                    sizes = [int(x) for x in saved_splitter]
+                    if len(sizes) == 2 and sum(sizes) > 0:
+                        self.rules_splitter.setSizes(sizes)
+                except Exception:
+                    pass
+        self.rules_splitter.splitterMoved.connect(self._on_rules_splitter_moved)
 
         return widget
 
@@ -10562,14 +10676,31 @@ class MainWindow(QMainWindow):
         if hasattr(self, "rules_table") and not self.settings.contains("rules_table_header_state"):
             rules_w = self.rules_table.viewport().width()
             if rules_w > 100:
-                # ID, Title / Keyword, Channel, End Buffer, Retain, Enabled
-                min_widths = [50, 180, 100, 110, 80, 80]
-                shares = [0.08, 0.44, 0.18, 0.12, 0.09, 0.09]
+                # ID, Title / Keyword, Channel, End Buffer, Retain, Enabled, Matches
+                min_widths = [50, 180, 100, 100, 75, 75, 95]
+                shares = [0.07, 0.36, 0.16, 0.12, 0.09, 0.08, 0.12]
                 allocated = [max(mw, int(rules_w * s)) for mw, s in zip(min_widths, shares)]
                 diff = rules_w - sum(allocated)
                 if diff > 0:
                     allocated[1] += diff
                 h = self.rules_table.horizontalHeader()
+                h.blockSignals(True)
+                for i, fw in enumerate(allocated):
+                    h.resizeSection(i, fw)
+                h.blockSignals(False)
+
+        # 4. Matched Shows Table
+        if hasattr(self, "matched_shows_table") and not self.settings.contains("matched_shows_header_state"):
+            mw_w = self.matched_shows_table.viewport().width()
+            if mw_w > 100:
+                # Show / Episode Title, Channel, Air Date & Time, Duration, Applied Buffer, DVR Status
+                m_min_widths = [180, 80, 140, 75, 85, 100]
+                m_shares = [0.38, 0.10, 0.22, 0.09, 0.09, 0.12]
+                allocated = [max(mw, int(mw_w * s)) for mw, s in zip(m_min_widths, m_shares)]
+                diff = mw_w - sum(allocated)
+                if diff > 0:
+                    allocated[0] += diff
+                h = self.matched_shows_table.horizontalHeader()
                 h.blockSignals(True)
                 for i, fw in enumerate(allocated):
                     h.resizeSection(i, fw)
@@ -13950,7 +14081,32 @@ class MainWindow(QMainWindow):
     def _save_rules_table_header_state(self, *args):
         """Persists the user's custom column placements for the auto-record rules table."""
         if hasattr(self, "rules_table") and hasattr(self, "settings"):
+            self.settings.setValue("rules_table_header_version", 2)
             self.settings.setValue("rules_table_header_state", self.rules_table.horizontalHeader().saveState())
+
+    def _save_matched_shows_header_state(self, *args):
+        """Persists the user's custom column placements for the matched shows table."""
+        if hasattr(self, "matched_shows_table") and hasattr(self, "settings"):
+            self.settings.setValue("matched_shows_header_state", self.matched_shows_table.horizontalHeader().saveState())
+
+    def _apply_initial_collapsed_splitter(self):
+        if hasattr(self, "matched_shows_container"):
+            self.matched_shows_container.setMaximumHeight(36)
+        if hasattr(self, "rules_splitter"):
+            if self.rules_splitter.handle(1):
+                self.rules_splitter.handle(1).setEnabled(False)
+            total = sum(self.rules_splitter.sizes())
+            if total > 50:
+                self.rules_splitter.setSizes([total - 36, 36])
+
+    def _on_rules_splitter_moved(self, *args):
+        """Persists custom vertical splitter sizes when the user resizes the expanded drawer."""
+        if hasattr(self, "rules_splitter") and hasattr(self, "settings"):
+            if not self.settings.value("rules_drawer_collapsed", False, type=bool):
+                self.settings.setValue("rules_splitter_sizes", self.rules_splitter.sizes())
+
+    def _save_rules_splitter_sizes(self, *args):
+        self._on_rules_splitter_moved(*args)
 
     def _scroll_list_to_first_active(self):
         """Scroll list guide table to the first live or upcoming show."""
@@ -16113,18 +16269,196 @@ class MainWindow(QMainWindow):
                 enabled_item = SortableTableWidgetItem(enabled_str, sort_key=1 if enabled else 0)
                 enabled_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.rules_table.setItem(row, 5, enabled_item)
+
+                # Column 6: Matches in Guide
+                matches = self.rules_engine.get_matching_programs_for_rule(r) if hasattr(self, "rules_engine") else []
+                match_count = len(matches)
+                match_str = f"{match_count} upcoming" if match_count > 0 else "-"
+                match_item = SortableTableWidgetItem(match_str, sort_key=match_count)
+                match_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if match_count > 0:
+                    match_item.setForeground(QColor("#4299e1"))
+                    match_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                else:
+                    match_item.setForeground(QColor("#718096"))
+                self.rules_table.setItem(row, 6, match_item)
         finally:
             self.rules_table.setSortingEnabled(was_sorting)
 
         # Restore selection after sorting
+        restored = False
         if selected_rule_id is not None:
             for r in range(self.rules_table.rowCount()):
                 it = self.rules_table.item(r, 0)
                 if it and it.text() == selected_rule_id:
                     self.rules_table.setCurrentCell(r, 1)
+                    restored = True
                     break
+        if not restored and self.rules_table.rowCount() > 0:
+            self.rules_table.setCurrentCell(0, 1)
+
+        self._on_rule_selection_changed()
+        self._adjust_table_columns()
+
+    def toggle_matched_shows_drawer(self):
+        is_expanded = not self.matched_shows_table.isHidden()
+        if is_expanded:
+            self.matched_shows_table.setVisible(False)
+            self.refresh_matched_shows_btn.setVisible(False)
+            self.toggle_matched_pane_btn.setArrowType(Qt.ArrowType.RightArrow)
+            self.toggle_matched_pane_btn.setText("Show Upcoming Matches")
+            self.settings.setValue("rules_drawer_collapsed", True)
+            if hasattr(self, "matched_shows_container"):
+                self.matched_shows_container.setMaximumHeight(36)
+            if hasattr(self, "rules_splitter"):
+                if self.rules_splitter.handle(1):
+                    self.rules_splitter.handle(1).setEnabled(False)
+                total = sum(self.rules_splitter.sizes())
+                if total > 50:
+                    self.rules_splitter.setSizes([total - 36, 36])
+        else:
+            if hasattr(self, "matched_shows_container"):
+                self.matched_shows_container.setMaximumHeight(16777215)
+            self.matched_shows_table.setVisible(True)
+            self.refresh_matched_shows_btn.setVisible(True)
+            self.toggle_matched_pane_btn.setArrowType(Qt.ArrowType.DownArrow)
+            self.toggle_matched_pane_btn.setText("Upcoming Shows Caught by Selected Rule")
+            self.settings.setValue("rules_drawer_collapsed", False)
+            if hasattr(self, "rules_splitter"):
+                if self.rules_splitter.handle(1):
+                    self.rules_splitter.handle(1).setEnabled(True)
+                saved_sizes = self.settings.value("rules_splitter_sizes")
+                if saved_sizes and isinstance(saved_sizes, (list, tuple)) and len(saved_sizes) == 2 and int(saved_sizes[1]) > 60:
+                    self.rules_splitter.setSizes([int(s) for s in saved_sizes])
+                else:
+                    total = sum(self.rules_splitter.sizes())
+                    if total > 100:
+                        self.rules_splitter.setSizes([int(total * 0.55), int(total * 0.45)])
+            self._adjust_table_columns()
+
+    def _on_rule_selection_changed(self):
+        cur_row = self.rules_table.currentRow()
+        if cur_row < 0:
+            self._update_matched_shows_view(None)
+            return
+        it_id = self.rules_table.item(cur_row, 0)
+        if not it_id:
+            self._update_matched_shows_view(None)
+            return
+        rule_id = it_id.text()
+        rule = next((r for r in self.rules_engine.get_rules() if str(r.get("id")) == str(rule_id)), None)
+        self._update_matched_shows_view(rule)
+
+    def _update_matched_shows_view(self, rule: Optional[Dict[str, Any]]):
+        if not hasattr(self, "matched_shows_table"):
+            return
+
+        was_sorting = self.matched_shows_table.isSortingEnabled()
+        self.matched_shows_table.setSortingEnabled(False)
+        try:
+            if not rule:
+                self.matched_shows_title.setText("(No rule selected)")
+                self.matched_shows_count_label.setText("No rule selected")
+                self.matched_shows_table.setRowCount(1)
+                placeholder = QTableWidgetItem("Select a rule from the table above to view upcoming matches in the guide.")
+                placeholder.setForeground(QColor("#718096"))
+                self.matched_shows_table.setItem(0, 0, placeholder)
+                for c in range(1, 6):
+                    self.matched_shows_table.setItem(0, c, QTableWidgetItem(""))
+                return
+
+            kw = rule.get("title_keyword", "")
+            ch = rule.get("channel", "All")
+            self.matched_shows_title.setText(f'"{kw}" on {ch}')
+
+            matches = self.rules_engine.get_matching_programs_for_rule(rule) if hasattr(self, "rules_engine") else []
+            count = len(matches)
+            if count == 0:
+                self.matched_shows_count_label.setText("0 upcoming broadcasts found in guide")
+                self.matched_shows_table.setRowCount(1)
+                placeholder = QTableWidgetItem(f'No upcoming airings found in cached guide for "{kw}" on {ch}.')
+                placeholder.setForeground(QColor("#718096"))
+                self.matched_shows_table.setItem(0, 0, placeholder)
+                for c in range(1, 6):
+                    self.matched_shows_table.setItem(0, c, QTableWidgetItem(""))
+                return
+
+            self.matched_shows_count_label.setText(f"{count} upcoming broadcast{'s' if count != 1 else ''} found")
+            self.matched_shows_table.setRowCount(count)
+
+            active_map = self.queue_mgr.get_active_scheduled_map() if hasattr(self, "queue_mgr") and self.queue_mgr else None
+
+            for row, m in enumerate(matches):
+                prog = m.get("program", {})
+                rec_title = m.get("title", "")
+                prog_ch = m.get("channel", "")
+                start_iso = m.get("start_iso", "")
+                start_local = m.get("start_time_local", "") or start_iso
+                dur_mins = m.get("duration_mins", 0)
+                buf_mins = m.get("buffer_mins", 0)
+
+                # Column 0: Show / Episode Title (with stored program data)
+                title_item = SortableTableWidgetItem(rec_title, sort_key=rec_title.lower())
+                title_item.setData(Qt.ItemDataRole.UserRole, prog)
+                self.matched_shows_table.setItem(row, 0, title_item)
+
+                # Column 1: Channel
+                ch_item = SortableTableWidgetItem(prog_ch, sort_key=prog_ch.lower())
+                self.matched_shows_table.setItem(row, 1, ch_item)
+
+                # Column 2: Air Date & Time
+                air_item = SortableTableWidgetItem(start_local, sort_key=start_iso)
+                self.matched_shows_table.setItem(row, 2, air_item)
+
+                # Column 3: Duration
+                if dur_mins >= 60:
+                    dur_str = f"{dur_mins // 60}h {dur_mins % 60}m" if dur_mins % 60 else f"{dur_mins // 60}h"
+                else:
+                    dur_str = f"{dur_mins}m"
+                dur_item = SortableTableWidgetItem(dur_str, sort_key=dur_mins)
+                dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.matched_shows_table.setItem(row, 3, dur_item)
+
+                # Column 4: Applied Buffer
+                buf_str = f"+{buf_mins}m" if buf_mins > 0 else "0m / Default"
+                buf_item = SortableTableWidgetItem(buf_str, sort_key=buf_mins)
+                buf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.matched_shows_table.setItem(row, 4, buf_item)
+
+                # Column 5: DVR Queue Status
+                rec = self.get_active_recording_for_program(prog, active_map=active_map) if hasattr(self, "get_active_recording_for_program") else None
+                if rec:
+                    st = rec.get("status", "QUEUED")
+                    st_str = "Queued" if st == "QUEUED" else st.capitalize()
+                    if rec.get("protected"):
+                        st_str += " (Protected)"
+                    st_item = SortableTableWidgetItem(st_str, sort_key=2)
+                    st_item.setForeground(QColor("#28a745"))
+                    st_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                else:
+                    if not rule.get("enabled", True):
+                        st_str = "Rule Disabled"
+                        st_item = SortableTableWidgetItem(st_str, sort_key=0)
+                        st_item.setForeground(QColor("#e53e3e"))
+                    else:
+                        st_str = "Not Queued"
+                        st_item = SortableTableWidgetItem(st_str, sort_key=1)
+                        st_item.setForeground(QColor("#a0aec0"))
+                st_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.matched_shows_table.setItem(row, 5, st_item)
+        finally:
+            self.matched_shows_table.setSortingEnabled(was_sorting)
 
         self._adjust_table_columns()
+
+    def _on_matched_show_double_clicked(self, item: QTableWidgetItem):
+        row = item.row()
+        it_first = self.matched_shows_table.item(row, 0)
+        if not it_first:
+            return
+        prog = it_first.data(Qt.ItemDataRole.UserRole)
+        if isinstance(prog, dict) and hasattr(self, "handle_program_activation"):
+            self.handle_program_activation(prog)
 
     def toggle_selected_rule_protected(self):
         row = self.rules_table.currentRow()
@@ -16208,8 +16542,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Selection Required", "Please select a rule to remove.")
             return
         rule_id = self.rules_table.item(row, 0).text()
-        self.rules_engine.remove_rule(rule_id)
+        kw = self.rules_table.item(row, 1).text() if self.rules_table.item(row, 1) else ""
+        cancelled = self.rules_engine.remove_rule(rule_id, cancel_scheduled=True)
         self.refresh_rules()
+        if cancelled:
+            self.refresh_recordings()
+            self.status_bar.showMessage(f"Rule '{kw}' removed. Cancelled {len(cancelled)} scheduled recording(s).", 5000)
+        else:
+            self.status_bar.showMessage(f"Rule '{kw}' removed.", 4000)
 
     def run_rules(self, silent: bool = False):
         if not silent:
@@ -16227,6 +16567,7 @@ class MainWindow(QMainWindow):
         else:
             msg = f"Rule check completed. {len(scheduled)} new recordings scheduled."
             self.status_bar.showMessage(msg, 5000)
+            self.refresh_rules()
             if scheduled:
                 self.watcher.check_and_dispatch(notify=False)
                 self.refresh_recordings()

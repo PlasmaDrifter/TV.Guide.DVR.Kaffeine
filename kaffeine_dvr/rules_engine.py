@@ -69,10 +69,78 @@ class RulesEngine:
         self.config_mgr.rules = rules
         return rule
 
-    def remove_rule(self, rule_id: str):
-        """Removes a series auto-recording rule by identifier."""
-        rules = [r for r in self.config_mgr.rules if r.get("id") != rule_id]
+    def remove_rule(self, rule_id: str, cancel_scheduled: bool = True) -> List[Dict[str, Any]]:
+        """
+        Removes a series auto-recording rule by identifier.
+        If cancel_scheduled is True, cancels any upcoming scheduled recordings
+        (in 'QUEUED' or 'ARMED' status) that match this rule, unless another active rule matches them.
+        Returns the list of cancelled recording dictionaries.
+        """
+        rule = next((r for r in self.config_mgr.rules if str(r.get("id")) == str(rule_id)), None)
+        rules = [r for r in self.config_mgr.rules if str(r.get("id")) != str(rule_id)]
         self.config_mgr.rules = rules
+
+        cancelled_recordings = []
+        if cancel_scheduled and rule and self.queue_mgr:
+            kw = (rule.get("title_keyword") or "").strip().lower()
+            ch = (rule.get("channel") or "All").strip().lower()
+            if kw:
+                # 1. Identify upcoming match broadcasts from guide for this rule
+                matched_sigs = set()
+                try:
+                    matches = self.get_matching_programs_for_rule(rule)
+                    for m in matches:
+                        p_ch = (m.get("channel") or "").strip().lower()
+                        p_start = (m.get("start_iso") or "")[:16]
+                        if p_ch and p_start:
+                            matched_sigs.add((p_ch, p_start))
+                except Exception as e:
+                    print(f"Error checking matching programs during rule removal: {e}")
+
+                # 2. Check if any remaining active rules also match these broadcasts
+                other_rule_sigs = set()
+                try:
+                    for other_rule in rules:
+                        if other_rule.get("enabled", True):
+                            for m in self.get_matching_programs_for_rule(other_rule):
+                                p_ch = (m.get("channel") or "").strip().lower()
+                                p_start = (m.get("start_iso") or "")[:16]
+                                if p_ch and p_start:
+                                    other_rule_sigs.add((p_ch, p_start))
+                except Exception as e:
+                    print(f"Error checking other rules during rule removal: {e}")
+
+                # 3. Cancel matching recordings in QUEUED or ARMED state
+                try:
+                    active_queue = self.queue_mgr.list_queue(include_completed=False)
+                    for rec in active_queue:
+                        st = rec.get("status", "")
+                        if st not in ("QUEUED", "ARMED"):
+                            continue
+                        r_ch = (rec.get("channel") or "").strip().lower()
+                        r_start = (rec.get("start_iso") or "")[:16]
+                        r_title = (rec.get("title") or "").strip().lower()
+
+                        # Do not cancel if another active rule also matches this program
+                        if (r_ch, r_start) in other_rule_sigs:
+                            continue
+
+                        is_match = False
+                        if (r_ch, r_start) in matched_sigs:
+                            is_match = True
+                        elif (ch == "all" or ch == r_ch) and kw in r_title:
+                            is_match = True
+
+                        if is_match:
+                            qid = rec.get("id")
+                            if qid:
+                                removed = self.queue_mgr.remove_recording(qid, self.dbus_client)
+                                if removed:
+                                    cancelled_recordings.append(removed)
+                except Exception as e:
+                    print(f"Error cancelling scheduled recordings during rule removal: {e}")
+
+        return cancelled_recordings
 
     def update_rule(self, rule_id: str, title_keyword: str, channel: str = "All", enabled: bool = True, buffer_mins: Optional[int] = None, protected: bool = False) -> bool:
         """Updates parameters of an existing series auto-recording rule."""
@@ -114,6 +182,71 @@ class RulesEngine:
         self.config_mgr.rules = rules
         return new_val
 
+    def get_matching_programs_for_rule(self, rule: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Finds upcoming programs in the cached TV guide that match the given rule.
+        Returns a list of match dictionaries with show info, timing, and computed buffer.
+        """
+        kw = (rule.get("title_keyword") or "").strip()
+        ch = (rule.get("channel") or "All").strip()
+        is_rule_prot = bool(rule.get("protected", False))
+        if not kw:
+            return []
+
+        matching_programs = self.guide_service.search_programs(
+            query=kw,
+            channel=ch if ch != "All" else None
+        )
+
+        matches = []
+        for prog in matching_programs:
+            show_title = prog.get("show_title", "")
+            episode_title = prog.get("episode_title") or ""
+            full_text = f"{show_title} {episode_title}".lower()
+            if kw.lower() not in full_text:
+                continue
+
+            prog_channel = prog.get("kaffeine_channel", "")
+            start_iso = prog.get("start_iso", "")
+            duration_iso = prog.get("duration_iso", "")
+            prog_dur = get_program_duration_mins(prog)
+
+            is_sports = is_sports_program(prog)
+            if is_sports and episode_title:
+                rec_title = f"{show_title}: {episode_title}" if show_title else episode_title
+            elif episode_title:
+                rec_title = f"{show_title} - {episode_title}"
+            else:
+                rec_title = show_title
+
+            # Determine post-roll recording buffer
+            rule_buf = rule.get("buffer_mins")
+            if rule_buf is not None and rule_buf >= 0:
+                applied_buffer = int(rule_buf)
+            elif self.config_mgr.auto_buffer_sports and is_sports and prog_dur > 91:
+                applied_buffer = int(self.config_mgr.sports_buffer_mins)
+            else:
+                applied_buffer = int(self.config_mgr.end_buffer_mins)
+
+            matches.append({
+                "program": prog,
+                "title": rec_title,
+                "show_title": show_title,
+                "episode_title": episode_title,
+                "channel": prog_channel,
+                "start_iso": start_iso,
+                "start_time_local": prog.get("start_time_local") or "",
+                "duration_iso": duration_iso,
+                "duration_mins": prog_dur,
+                "buffer_mins": applied_buffer,
+                "is_sports": is_sports,
+                "protected": is_rule_prot,
+                "summary": prog.get("summary") or ""
+            })
+
+        matches.sort(key=lambda m: m.get("start_iso", ""))
+        return matches
+
     def evaluate_and_schedule(self, progress_callback=None) -> List[Dict[str, Any]]:
         """
         Cross-reference active rules with cached guide listings,
@@ -137,46 +270,15 @@ class RulesEngine:
         newly_scheduled = []
 
         for rule in active_rules:
-            kw = rule.get("title_keyword", "").strip()
-            ch = rule.get("channel", "All")
-            is_rule_prot = bool(rule.get("protected", False))
-            if not kw:
-                continue
-
-            matching_programs = self.guide_service.search_programs(
-                query=kw,
-                channel=ch if ch != "All" else None
-            )
-
-            for prog in matching_programs:
-                show_title = prog.get("show_title", "")
-                episode_title = prog.get("episode_title") or ""
-                full_text = f"{show_title} {episode_title}".lower()
-                if kw.lower() not in full_text:
-                    continue
-
-                prog_channel = prog.get("kaffeine_channel", "")
-                start_iso = prog.get("start_iso", "")
-                duration_iso = prog.get("duration_iso", "")
-                episode_title = prog.get("episode_title") or ""
-
-                is_sports = is_sports_program(prog)
-                if is_sports and episode_title:
-                    rec_title = f"{show_title}: {episode_title}" if show_title else episode_title
-                elif episode_title:
-                    rec_title = f"{show_title} - {episode_title}"
-                else:
-                    rec_title = show_title
-
-                # Determine post-roll recording buffer
-                rule_buf = rule.get("buffer_mins")
-                prog_dur = get_program_duration_mins(prog)
-                if rule_buf is not None and rule_buf >= 0:
-                    applied_buffer = int(rule_buf)
-                elif self.config_mgr.auto_buffer_sports and is_sports and prog_dur > 91:
-                    applied_buffer = int(self.config_mgr.sports_buffer_mins)
-                else:
-                    applied_buffer = int(self.config_mgr.end_buffer_mins)
+            matches = self.get_matching_programs_for_rule(rule)
+            for m in matches:
+                rec_title = m["title"]
+                prog_channel = m["channel"]
+                start_iso = m["start_iso"]
+                duration_iso = m["duration_iso"]
+                applied_buffer = m["buffer_mins"]
+                is_rule_prot = m["protected"]
+                start_local = m["start_time_local"]
 
                 sig = (prog_channel.lower(), start_iso[:16])
                 existing_rec = existing_by_sig.get(sig)
@@ -195,7 +297,7 @@ class RulesEngine:
                     buf_note = f" (+{applied_buffer}m buffer)" if applied_buffer > 0 else ""
                     prot_note = " [Protected]" if is_rule_prot else ""
                     if progress_callback:
-                        progress_callback(f"Queueing: {rec_title}{buf_note}{prot_note} on {prog_channel} ({prog.get('start_time_local')})...")
+                        progress_callback(f"Queueing: {rec_title}{buf_note}{prot_note} on {prog_channel} ({start_local})...")
 
                     qid = queue_mgr.add_recording(
                         title=rec_title,
@@ -217,7 +319,7 @@ class RulesEngine:
                             "id": qid,
                             "title": rec_title,
                             "channel": prog_channel,
-                            "start_time": prog.get("start_time_local"),
+                            "start_time": start_local,
                             "protected": is_rule_prot
                         })
                 except Exception as e:

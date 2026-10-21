@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.9.2
+
+- **Collapsible Caught Shows Drawer in Auto-Record Rules**: Added an interactive collapsible detail drawer to the Auto-Record Rules tab dynamically displaying upcoming broadcasts in the cached guide matched by each rule. The drawer includes show/episode title, channel, air date/time, duration, applied end buffer (with sports detection), and live DVR queue status (Queued, Armed, Recording, Not Queued). Double-clicking any show opens its program details and scheduling options dialog.
+- **Auto-Record Rules Match Counter & Header Migration**: Added a dedicated "Matches" column to the Auto-Record Rules table showing the upcoming match count for each rule (e.g. "2 upcoming"). Integrated automatic header state version migration so existing user configurations update seamlessly without column clipping.
+- **Splitter Handle Locking on Collapse**: When the caught shows drawer is collapsed, the vertical splitter handle is locked and the container height is constrained to the header bar, preventing the drawer from creating empty gaps or getting misaligned when grabbed.
+- **Automatic Scheduled Recording Cancellation on Rule Removal**: Removing an auto-recording rule automatically cancels any upcoming scheduled recordings (in QUEUED or ARMED status) created for that rule from both the SQLite recording queue and Kaffeine scheduler, while preserving any broadcasts still needed by other active rules.
+- **Buffer Stepper Controls & Form Layout Polish**: Enhanced buffer configuration across all dialogs (Add Rule, Edit Rule, Manual Record, Adjust Buffer) with tactile NumberStepper controls (`[-] [ value ] [+]`) for reliable adjustment without numeric scroll jumpiness, and cleaned up form checkbox labels to prevent text clipping.
+- **Unified Queue Management**: Standardized queue manager instance sharing between the main window and rules engine, ensuring consistent database operations and immediate view synchronization across the application.
+
 ## v0.9.1
 
 - **Dedicated Custom Grid Theme Trash Buttons**: Added a direct trash button next to each custom preset in Settings > Themes, allowing custom themes to be deleted without having to activate or switch to them first. Preserves the currently active theme when deleting an inactive custom preset, and removes the obsolete delete icon from the theme editor header.

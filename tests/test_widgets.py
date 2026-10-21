@@ -1535,3 +1535,77 @@ def test_check_first_run_launches_kaffeine(qtbot, isolated_config, monkeypatch):
     assert isolated_config.launch_mode == "normal"
     assert launched_modes == ["normal"]
 
+
+def test_rules_tab_matched_shows_drawer(qtbot, isolated_config):
+    from unittest.mock import MagicMock
+
+    win = MainWindow(config_mgr=isolated_config)
+    qtbot.addWidget(win)
+
+    # 1. Verify structure of rules tab
+    assert win.rules_table.columnCount() == 7
+    assert win.rules_table.horizontalHeaderItem(6).text() == "Matches"
+    assert hasattr(win, "matched_shows_table")
+    assert win.matched_shows_table.columnCount() == 6
+    assert hasattr(win, "rules_splitter")
+    assert hasattr(win, "toggle_matched_pane_btn")
+
+    # 2. Add a rule and mock guide search
+    rule = win.rules_engine.add_rule("Suns", channel="SUNS", buffer_mins=15)
+    matching_prog = {
+        "show_title": "Phoenix Suns at Portland Trail Blazers",
+        "episode_title": "",
+        "summary": "NBA Regular Season",
+        "kaffeine_channel": "SUNS",
+        "start_iso": "2026-10-21T19:00:00",
+        "duration_iso": "02:30:00",
+        "start_time_local": "2026-10-21 07:00 PM",
+    }
+    win.rules_engine.guide_service.search_programs = MagicMock(return_value=[matching_prog])
+
+    win.refresh_rules()
+
+    # Rule row should show 1 upcoming match
+    assert win.rules_table.rowCount() == 1
+    assert win.rules_table.item(0, 6).text() == "1 upcoming"
+
+    # Matched shows table should display the show
+    assert win.matched_shows_table.rowCount() == 1
+    assert win.matched_shows_table.item(0, 0).text() == "Phoenix Suns at Portland Trail Blazers"
+    assert win.matched_shows_table.item(0, 1).text() == "SUNS"
+    assert win.matched_shows_table.item(0, 2).text() == "2026-10-21 07:00 PM"
+    assert win.matched_shows_table.item(0, 3).text() == "2h 30m"
+    assert win.matched_shows_table.item(0, 4).text() == "+15m"
+    assert win.matched_shows_table.item(0, 5).text() == "Not Queued"
+
+    # 3. Test collapsing and expanding drawer
+    assert not win.matched_shows_table.isHidden()
+    win.toggle_matched_shows_drawer()
+    assert win.matched_shows_table.isHidden()
+    assert win.matched_shows_container.maximumHeight() == 36
+    assert win.rules_splitter.handle(1).isEnabled() is False
+    assert win.settings.value("rules_drawer_collapsed", type=bool) is True
+
+    win.toggle_matched_shows_drawer()
+    assert not win.matched_shows_table.isHidden()
+    assert win.matched_shows_container.maximumHeight() > 1000
+    assert win.rules_splitter.handle(1).isEnabled() is True
+    assert win.settings.value("rules_drawer_collapsed", type=bool) is False
+
+    # 4. Test double clicking row activates program details
+    activated_progs = []
+    win.handle_program_activation = lambda p: activated_progs.append(p)
+    win._on_matched_show_double_clicked(win.matched_shows_table.item(0, 0))
+    assert len(activated_progs) == 1
+    assert activated_progs[0]["show_title"] == "Phoenix Suns at Portland Trail Blazers"
+
+    # 5. Test removing a rule removes scheduled recordings
+    win.rules_engine.evaluate_and_schedule()
+    assert len(win.queue_mgr.list_queue()) == 1
+
+    win.rules_table.setCurrentCell(0, 0)
+    win.remove_selected_rule()
+    assert win.rules_table.rowCount() == 0
+    assert len(win.queue_mgr.list_queue()) == 0
+
+

@@ -144,3 +144,90 @@ def test_rules_protected_flag_and_propagation(isolated_config, isolated_guide_sv
     re.evaluate_and_schedule()
     assert isolated_queue_mgr.get_recording(queued[0]["id"])["protected"] == 1
 
+
+def test_get_matching_programs_for_rule(isolated_config, isolated_guide_svc, isolated_queue_mgr):
+    from unittest.mock import MagicMock
+
+    dbus = KaffeineDbusClient()
+    re = RulesEngine(isolated_config, dbus, isolated_guide_svc, isolated_queue_mgr)
+
+    rule = {"title_keyword": "Suns", "channel": "SUNS", "buffer_mins": 15, "protected": True}
+
+    prog1 = {
+        "show_title": "Phoenix Suns at Portland Trail Blazers",
+        "episode_title": "",
+        "summary": "NBA Regular Season",
+        "kaffeine_channel": "SUNS",
+        "start_iso": "2026-10-21T19:00:00",
+        "duration_iso": "02:30:00",
+        "start_time_local": "2026-10-21 07:00 PM",
+    }
+    prog2 = {
+        "show_title": "Golden State Warriors at Phoenix Suns",
+        "episode_title": "",
+        "summary": "NBA Regular Season",
+        "kaffeine_channel": "SUNS",
+        "start_iso": "2026-10-24T18:00:00",
+        "duration_iso": "02:30:00",
+        "start_time_local": "2026-10-24 06:00 PM",
+    }
+    prog_other = {
+        "show_title": "Late Night News",
+        "episode_title": "",
+        "summary": "Local headlines",
+        "kaffeine_channel": "SUNS",
+        "start_iso": "2026-10-21T23:00:00",
+        "duration_iso": "00:30:00",
+        "start_time_local": "2026-10-21 11:00 PM",
+    }
+
+    re.guide_service.search_programs = MagicMock(return_value=[prog2, prog1, prog_other])
+
+    matches = re.get_matching_programs_for_rule(rule)
+    assert len(matches) == 2
+    # Verify sorted chronologically
+    assert matches[0]["title"] == "Phoenix Suns at Portland Trail Blazers"
+    assert matches[0]["start_iso"] == "2026-10-21T19:00:00"
+    assert matches[0]["buffer_mins"] == 15
+    assert matches[0]["protected"] is True
+
+    assert matches[1]["title"] == "Golden State Warriors at Phoenix Suns"
+    assert matches[1]["start_iso"] == "2026-10-24T18:00:00"
+
+
+def test_remove_rule_cancels_scheduled_recordings(isolated_config, isolated_guide_svc, isolated_queue_mgr):
+    from unittest.mock import MagicMock
+
+    dbus = KaffeineDbusClient()
+    re = RulesEngine(isolated_config, dbus, isolated_guide_svc, isolated_queue_mgr)
+
+    rule = re.add_rule("Suns", channel="SUNS", buffer_mins=15)
+    prog = {
+        "show_title": "Phoenix Suns at Portland Trail Blazers",
+        "episode_title": "",
+        "summary": "NBA Regular Season",
+        "kaffeine_channel": "SUNS",
+        "start_iso": "2026-10-21T19:00:00",
+        "duration_iso": "02:30:00",
+        "start_time_local": "2026-10-21 07:00 PM",
+    }
+    re.guide_service.search_programs = MagicMock(return_value=[prog])
+
+    # Schedule the program
+    scheduled = re.evaluate_and_schedule()
+    assert len(scheduled) == 1
+    queue_items = isolated_queue_mgr.list_queue()
+    assert len(queue_items) == 1
+    assert queue_items[0]["title"] == "Phoenix Suns at Portland Trail Blazers"
+
+    # Now remove the rule
+    cancelled = re.remove_rule(rule["id"], cancel_scheduled=True)
+    assert len(cancelled) == 1
+    assert len(re.get_rules()) == 0
+
+    # Verify recording queue is now empty
+    queue_items_after = isolated_queue_mgr.list_queue()
+    assert len(queue_items_after) == 0
+
+
+

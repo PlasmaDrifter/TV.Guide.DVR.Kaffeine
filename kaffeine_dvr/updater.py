@@ -95,6 +95,13 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.3": (
+        "## What's Changed in v0.9.3\n\n"
+        "• **Channel Groups & Favorites Filtering**: Create, manage, and filter custom channel lists (e.g. Favorites, Sports, News) with live channel counts and direct integration into the main TV Guide toolbar dropdown menu.\n"
+        "• **Synchronized Channel Order & Groups**: Reordering channels in the TV Guide Channel Order list now automatically syncs and renumbers channel order across Channel Groups & Favorites.\n"
+        "• **Aligned Channel Management Panels**: Symmetrically matched header layouts, list start positions, and uniform item row heights across Channel Order and Channel Groups panels, eliminating dead spacing.\n"
+        "• **High-Contrast Compact Checkboxes**: Tuned channel group selector checkboxes to a crisp 16px size for clean alignment with channel labels."
+    ),
     "0.9.2": (
         "## What's Changed in v0.9.2\n\n"
         "• **Collapsible Caught Shows Drawer in Auto-Record Rules**: Added an interactive collapsible detail drawer to the Auto-Record Rules tab dynamically displaying upcoming broadcasts in the cached guide matched by each rule. The drawer includes show/episode title, channel, air date/time, duration, applied end buffer (with sports detection), and live DVR queue status (Queued, Armed, Recording, Not Queued). Double-clicking any show opens its program details and scheduling options dialog.\n"

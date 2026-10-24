@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.9.3
+
+- **Channel Groups & Favorites Filtering**: Create, manage, and filter custom channel lists (e.g. Favorites, Sports, News) with live channel counts and direct integration into the main TV Guide toolbar dropdown menu.
+- **Synchronized Channel Order & Groups**: Reordering channels in the TV Guide Channel Order list now automatically syncs and renumbers channel order across Channel Groups & Favorites.
+- **Aligned Channel Management Panels**: Symmetrically matched header layouts, list start positions, and uniform item row heights across Channel Order and Channel Groups panels, eliminating dead spacing.
+- **High-Contrast Compact Checkboxes**: Tuned channel group selector checkboxes to a crisp 16px size for clean alignment with channel labels.
+
 ## v0.9.2
 
 - **Nord & Tokyo Night Built-In Themes**: Expanded both Application Shell Themes and Guide Grid Presets to 10 built-in options with the addition of **Nord** (Arctic slate with frost teal accents and polar night past shading) and **Tokyo Night** (modern midnight navy with electric blue/magenta accents and deep past broadcast shading).

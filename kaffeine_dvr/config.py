@@ -779,6 +779,10 @@ class ConfigManager:
                         for sc_k, sc_v in DEFAULT_SHORTCUTS.items():
                             if sc_k not in data["keyboard_shortcuts"]:
                                 data["keyboard_shortcuts"][sc_k] = sc_v
+                    if "channel_groups" not in data or not isinstance(data.get("channel_groups"), dict):
+                        data["channel_groups"] = {"Favorites": []}
+                    elif not data["channel_groups"]:
+                        data["channel_groups"]["Favorites"] = []
                     return data
             except Exception:
                 pass
@@ -856,7 +860,8 @@ class ConfigManager:
             "web_server_bind": "0.0.0.0",
             "web_server_password_hash": "",
             "web_server_salt": "",
-            "keyboard_shortcuts": dict(DEFAULT_SHORTCUTS)
+            "keyboard_shortcuts": dict(DEFAULT_SHORTCUTS),
+            "channel_groups": {"Favorites": []}
         }
 
     def reset_to_defaults(self, keep_channels_and_rules: bool = True):
@@ -991,6 +996,103 @@ class ConfigManager:
                 ordered.append(ch)
 
         return ordered
+
+    @property
+    def channel_groups(self) -> Dict[str, List[str]]:
+        groups = self.data.get("channel_groups")
+        if not isinstance(groups, dict):
+            groups = {"Favorites": []}
+            self.data["channel_groups"] = groups
+        elif not groups:
+            groups["Favorites"] = []
+            self.data["channel_groups"] = groups
+        return groups
+
+    @channel_groups.setter
+    def channel_groups(self, val: Dict[str, List[str]]):
+        if not isinstance(val, dict):
+            val = {"Favorites": []}
+        self.data["channel_groups"] = val
+        self.save()
+
+    def get_channel_groups(self) -> Dict[str, List[str]]:
+        """Returns all channel groups ensuring at least one list exists."""
+        return dict(self.channel_groups)
+
+    def get_channel_group(self, name: str) -> List[str]:
+        """Returns channels belonging to the specified group (ordered by configured channel order)."""
+        groups = self.channel_groups
+        raw_channels = groups.get(name, [])
+        all_ordered = self.get_ordered_channels()
+        # Filter and sort according to lineup channel order
+        ordered_group = [ch for ch in all_ordered if ch in raw_channels]
+        # Include any remaining entries not currently in lineup order
+        for ch in raw_channels:
+            if ch not in ordered_group:
+                ordered_group.append(ch)
+        return ordered_group
+
+    def save_channel_group(self, name: str, channels: List[str]):
+        """Saves channel membership for a group."""
+        groups = dict(self.channel_groups)
+        groups[name] = list(channels)
+        self.channel_groups = groups
+
+    def create_channel_group(self, name: str) -> bool:
+        """Creates a new named channel group. Returns False if already exists or invalid."""
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return False
+        groups = dict(self.channel_groups)
+        if clean_name in groups:
+            return False
+        groups[clean_name] = []
+        self.channel_groups = groups
+        return True
+
+    def rename_channel_group(self, old_name: str, new_name: str) -> bool:
+        """Renames an existing channel group. Returns False if invalid or conflict."""
+        old_clean = (old_name or "").strip()
+        new_clean = (new_name or "").strip()
+        if not old_clean or not new_clean or old_clean == new_clean:
+            return False
+        groups = dict(self.channel_groups)
+        if old_clean not in groups:
+            return False
+        if new_clean in groups:
+            return False
+        # Preserve order of groups while renaming key
+        new_dict = {}
+        for k, v in groups.items():
+            if k == old_clean:
+                new_dict[new_clean] = v
+            else:
+                new_dict[k] = v
+        self.channel_groups = new_dict
+        return True
+
+    def delete_channel_group(self, name: str) -> bool:
+        """Deletes a channel group. If all groups are removed, ensures a new empty 'Favorites' exists."""
+        clean_name = (name or "").strip()
+        groups = dict(self.channel_groups)
+        if clean_name not in groups:
+            return False
+        del groups[clean_name]
+        if not groups:
+            groups["Favorites"] = []
+        self.channel_groups = groups
+        return True
+
+    def prune_channel_from_groups(self, channel: str):
+        """Removes a channel from all channel groups when it is deleted from the lineup."""
+        groups = dict(self.channel_groups)
+        changed = False
+        for g_name, ch_list in groups.items():
+            if channel in ch_list:
+                groups[g_name] = [c for c in ch_list if c != channel]
+                changed = True
+        if changed:
+            self.channel_groups = groups
 
     @property
     def rules(self) -> List[Dict[str, Any]]:

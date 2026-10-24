@@ -18,7 +18,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 try:
     from .config import ConfigManager
@@ -966,7 +966,7 @@ class GuideService:
     def search_programs(
         self,
         query: str = "",
-        channel: Optional[str] = None,
+        channel: Optional[Union[str, List[str], Set[str]]] = None,
         airdate: Optional[str] = None,
         trim_ended: bool = True,
         include_overhang: bool = False
@@ -985,16 +985,23 @@ class GuideService:
             params.extend([q_like, q_like, q_like])
 
         if channel and channel != "All":
-            ch_targets = {channel}
-            if getattr(self, "channel_map", None):
-                if channel in self.channel_map:
-                    ch_targets.add(self.channel_map[channel])
-                for k, v in self.channel_map.items():
-                    if v == channel:
-                        ch_targets.add(k)
-            placeholders = ",".join("?" for _ in ch_targets)
-            sql += f" AND (kaffeine_channel IN ({placeholders}) OR network IN ({placeholders}))"
-            params.extend(list(ch_targets) + list(ch_targets))
+            if isinstance(channel, (list, tuple, set)):
+                raw_channels = set(channel)
+            else:
+                raw_channels = {channel}
+
+            if raw_channels:
+                ch_targets = set(raw_channels)
+                if getattr(self, "channel_map", None):
+                    for ch in raw_channels:
+                        if ch in self.channel_map:
+                            ch_targets.add(self.channel_map[ch])
+                    for k, v in self.channel_map.items():
+                        if v in raw_channels:
+                            ch_targets.add(k)
+                placeholders = ",".join("?" for _ in ch_targets)
+                sql += f" AND (kaffeine_channel IN ({placeholders}) OR network IN ({placeholders}))"
+                params.extend(list(ch_targets) + list(ch_targets))
 
         if airdate:
             if include_overhang:

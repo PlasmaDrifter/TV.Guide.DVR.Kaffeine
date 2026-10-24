@@ -5669,6 +5669,50 @@ QListWidget#channelOrderList::item:selected {{
     font-weight: bold;
 }}
 
+/* Channel Groups & Favorites List Widget */
+QListWidget#groupChannelsList {{
+    background-color: {tokens["bg_panel"]};
+    border: 1px solid {tokens["border_color"]};
+    border-radius: 6px;
+    padding: 4px;
+    font-size: 13px;
+}}
+QListWidget#groupChannelsList::item {{
+    background-color: {tokens["bg_subpanel"]};
+    border: 1px solid {tokens["border_color"]};
+    border-radius: 5px;
+    padding: 6px 10px;
+    margin-bottom: 3px;
+    color: {tokens["text_primary"]};
+    font-weight: 500;
+}}
+QListWidget#groupChannelsList::item:hover {{
+    background-color: {tokens["bg_button_hover"]};
+    border-color: {tokens["border_light"]};
+}}
+QListWidget#groupChannelsList::item:selected {{
+    background-color: {tokens["bg_button_hover"]};
+    border-color: {tokens["accent_primary"]};
+    color: {tokens["text_primary"]};
+}}
+QListWidget#groupChannelsList::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 2px solid {tokens["border_light"]};
+    border-radius: 3px;
+    background-color: {tokens["bg_input"]};
+    margin-right: 8px;
+}}
+QListWidget#groupChannelsList::indicator:hover {{
+    border-color: {tokens["accent_primary"]};
+    background-color: {tokens["bg_panel"]};
+}}
+QListWidget#groupChannelsList::indicator:checked {{
+    background-color: {tokens["accent_primary"]};
+    border-color: {tokens["accent_hover"]};
+    image: url("{checkmark_icon_path}");
+}}
+
 /* EPG Grid Table Styles */
 QTableWidget#guideGridTable, QTableWidget#guideListTable {{
     background-color: {tokens["table_bg"]};
@@ -6672,9 +6716,7 @@ class MainWindow(QMainWindow):
         filter_bar.addWidget(self.channel_label)
         self.guide_channel_combo = ThemedComboBox()
         self.guide_channel_combo.setObjectName("guideChannelCombo")
-        self.guide_channel_combo.addItem("All")
-        channels = self.config_mgr.get_ordered_channels()
-        self.guide_channel_combo.addItems(channels)
+        self.refresh_channel_dropdowns(reset_to_default=True)
         self.guide_channel_combo.currentIndexChanged.connect(self.filter_guide)
         filter_bar.addWidget(self.guide_channel_combo)
 
@@ -7562,9 +7604,10 @@ class MainWindow(QMainWindow):
         order_box = QGroupBox("TV Guide Channel Order (Manual Priority)")
         order_layout = QVBoxLayout(order_box)
 
-        desc = QLabel("Reorder rows using drag-and-drop or Move Up/Down. Remove unwanted channels with Remove or Delete key.")
+        desc = QLabel("Reorder rows using drag-and-drop or Move Up/Down buttons below.")
         desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc.setStyleSheet("color: #8a99ad;")
+        desc.setFixedHeight(22)
         order_layout.addWidget(desc)
 
         order_legend = QLabel(
@@ -7577,6 +7620,7 @@ class MainWindow(QMainWindow):
             "</span>"
         )
         order_legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        order_legend.setFixedHeight(30)
         order_layout.addWidget(order_legend)
 
         self.channel_order_list = QListWidget()
@@ -7628,11 +7672,107 @@ class MainWindow(QMainWindow):
 
         order_layout.addLayout(order_ctrl_bar)
         lineup_panels.addWidget(order_box, 1)
+
+        # Third Panel: Channel Groups & Favorites Lists
+        groups_box = QGroupBox("Channel Groups && Favorites")
+        groups_layout = QVBoxLayout(groups_box)
+
+        groups_desc = QLabel(
+            "Organize channels into custom lists for quick filtering in the main guide."
+        )
+        groups_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        groups_desc.setStyleSheet("color: #8a99ad;")
+        groups_desc.setFixedHeight(22)
+        groups_layout.addWidget(groups_desc)
+
+        # Group Selector and Management Toolbar
+        grp_manage_row = QHBoxLayout()
+        grp_manage_row.setSpacing(6)
+
+        grp_lbl = QLabel("List:")
+        grp_lbl.setStyleSheet("font-weight: bold; color: #cbd5e1;")
+        grp_manage_row.addWidget(grp_lbl)
+
+        self.channel_group_combo = ThemedComboBox()
+        self.channel_group_combo.setObjectName("channelGroupCombo")
+        self.channel_group_combo.currentIndexChanged.connect(self._on_channel_group_selected)
+        grp_manage_row.addWidget(self.channel_group_combo, 1)
+
+        self.new_group_btn = QPushButton("+ New")
+        self.new_group_btn.setToolTip("Create a new channel group list")
+        self.new_group_btn.setStyleSheet(
+            "QPushButton {"
+            "  background-color: #1e3a8a;"
+            "  border: 1px solid #3b82f6;"
+            "  color: #eff6ff;"
+            "  font-weight: bold;"
+            "  padding: 4px 8px;"
+            "  border-radius: 4px;"
+            "}"
+            "QPushButton:hover { background-color: #2563eb; border-color: #60a5fa; color: #ffffff; }"
+            "QPushButton:pressed { background-color: #1d4ed8; }"
+        )
+        self.new_group_btn.clicked.connect(self._create_new_channel_group)
+        grp_manage_row.addWidget(self.new_group_btn)
+
+        self.rename_group_btn = QPushButton("✎ Rename")
+        self.rename_group_btn.setToolTip("Rename the currently selected group")
+        self.rename_group_btn.clicked.connect(self._rename_current_channel_group)
+        grp_manage_row.addWidget(self.rename_group_btn)
+
+        self.delete_group_btn = QPushButton("✕")
+        self.delete_group_btn.setObjectName("removeChannelBtn")
+        self.delete_group_btn.setToolTip("Delete this channel group list")
+        self.delete_group_btn.setStyleSheet(
+            "QPushButton#removeChannelBtn {"
+            "  background-color: #4a1515;"
+            "  border: 1px solid #7f1d1d;"
+            "  color: #fca5a5;"
+            "  font-weight: bold;"
+            "  padding: 4px 8px;"
+            "  border-radius: 4px;"
+            "}"
+            "QPushButton#removeChannelBtn:hover { background-color: #7f1d1d; border-color: #991b1b; color: #ffffff; }"
+            "QPushButton#removeChannelBtn:pressed { background-color: #350e0e; }"
+        )
+        self.delete_group_btn.clicked.connect(self._delete_current_channel_group)
+        grp_manage_row.addWidget(self.delete_group_btn)
+
+        grp_toolbar = QWidget()
+        grp_toolbar.setLayout(grp_manage_row)
+        grp_toolbar.setFixedHeight(30)
+        grp_manage_row.setContentsMargins(0, 0, 0, 0)
+        groups_layout.addWidget(grp_toolbar)
+
+        # Channels Checklist with checkboxes
+        self.group_channels_list = QListWidget()
+        self.group_channels_list.setObjectName("groupChannelsList")
+        self.group_channels_list.itemChanged.connect(self._on_group_channel_item_changed)
+        groups_layout.addWidget(self.group_channels_list)
+
+        # Quick bulk action row
+        grp_bulk_row = QHBoxLayout()
+        self.group_select_all_btn = QPushButton("Select All")
+        self.group_select_all_btn.clicked.connect(self._select_all_group_channels)
+        grp_bulk_row.addWidget(self.group_select_all_btn)
+
+        self.group_clear_all_btn = QPushButton("Clear All")
+        self.group_clear_all_btn.clicked.connect(self._clear_all_group_channels)
+        grp_bulk_row.addWidget(self.group_clear_all_btn)
+
+        grp_bulk_row.addStretch()
+        self.group_count_lbl = QLabel("0 channels")
+        self.group_count_lbl.setStyleSheet("color: #94a3b8; font-weight: bold;")
+        grp_bulk_row.addWidget(self.group_count_lbl)
+        groups_layout.addLayout(grp_bulk_row)
+
+        lineup_panels.addWidget(groups_box, 1)
         layout.addLayout(lineup_panels)
 
         self.populate_channel_mapping_text()
         self.refresh_channel_order_list()
         self.refresh_channel_health_badge()
+        self.refresh_channel_groups_ui()
         return widget
 
     def refresh_channel_health_badge(self):
@@ -7728,6 +7868,7 @@ class MainWindow(QMainWindow):
         health_data = self.config_mgr.channel_health
         for idx, ch in enumerate(ordered, 1):
             item = QListWidgetItem(f"{idx}.  {ch}")
+            item.setSizeHint(QSize(0, 32))
             item.setData(Qt.ItemDataRole.UserRole, ch)
             kaffeine_name = self.config_mgr.channel_map.get(ch, ch)
             h = health_data.get(ch) or health_data.get(kaffeine_name)
@@ -7805,6 +7946,8 @@ class MainWindow(QMainWindow):
     def _apply_channel_order_to_views(self):
         self.refresh_channel_dropdowns()
         self._refresh_guide_view(keep_scroll=True)
+        if hasattr(self, "_populate_group_channels_list"):
+            self._populate_group_channels_list()
 
     def _show_channel_order_context_menu(self, pos):
         item = self.channel_order_list.itemAt(pos)
@@ -7883,6 +8026,11 @@ class MainWindow(QMainWindow):
         # Prune cached database programs for this channel
         self.guide_service.delete_channel_programs([ch_name])
 
+        # Prune from custom channel groups / favorites
+        self.config_mgr.prune_channel_from_groups(ch_name)
+        if hasattr(self, "refresh_channel_groups_ui"):
+            self.refresh_channel_groups_ui()
+
         # Reflect in Channel Importing section text
         self.populate_channel_mapping_text()
 
@@ -7891,6 +8039,223 @@ class MainWindow(QMainWindow):
         self.refresh_channel_health_badge()
         self._apply_channel_order_to_views()
         self.flash_save_indicator(f"Removed '{ch_name}'")
+
+    def refresh_channel_groups_ui(self):
+        if not hasattr(self, "channel_group_combo") or not hasattr(self, "group_channels_list"):
+            return
+
+        groups = self.config_mgr.get_channel_groups()
+        cur_selected = self.channel_group_combo.currentText()
+
+        self.channel_group_combo.blockSignals(True)
+        self.channel_group_combo.clear()
+        for g_name in groups.keys():
+            self.channel_group_combo.addItem(g_name)
+
+        idx = self.channel_group_combo.findText(cur_selected)
+        if idx >= 0:
+            self.channel_group_combo.setCurrentIndex(idx)
+        elif self.channel_group_combo.count() > 0:
+            self.channel_group_combo.setCurrentIndex(0)
+        self.channel_group_combo.blockSignals(False)
+
+        self._populate_group_channels_list()
+
+    def _on_channel_group_selected(self, index: int):
+        self._populate_group_channels_list()
+
+    def _populate_group_channels_list(self):
+        if not hasattr(self, "group_channels_list") or not hasattr(self, "channel_group_combo"):
+            return
+
+        grp_name = self.channel_group_combo.currentText().strip()
+        grp_channels = set(self.config_mgr.get_channel_group(grp_name)) if grp_name else set()
+        all_ordered = self.config_mgr.get_ordered_channels()
+
+        self.group_channels_list.blockSignals(True)
+        self.group_channels_list.clear()
+
+        checked_count = 0
+        for idx, ch in enumerate(all_ordered, 1):
+            item = QListWidgetItem(f"{idx}.  {ch}")
+            item.setSizeHint(QSize(0, 32))
+            item.setData(Qt.ItemDataRole.UserRole, ch)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            if ch in grp_channels:
+                item.setCheckState(Qt.CheckState.Checked)
+                checked_count += 1
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
+            self.group_channels_list.addItem(item)
+
+        self.group_channels_list.blockSignals(False)
+
+        if hasattr(self, "group_count_lbl"):
+            self.group_count_lbl.setText(f"{checked_count} of {len(all_ordered)} channels")
+
+    def _on_group_channel_item_changed(self, item: QListWidgetItem):
+        if not hasattr(self, "channel_group_combo"):
+            return
+        grp_name = self.channel_group_combo.currentText().strip()
+        if not grp_name:
+            return
+
+        checked_channels = []
+        for i in range(self.group_channels_list.count()):
+            it = self.group_channels_list.item(i)
+            if it.checkState() == Qt.CheckState.Checked:
+                ch = it.data(Qt.ItemDataRole.UserRole)
+                if ch:
+                    checked_channels.append(ch)
+
+        self.config_mgr.save_channel_group(grp_name, checked_channels)
+
+        if hasattr(self, "group_count_lbl"):
+            total = self.group_channels_list.count()
+            self.group_count_lbl.setText(f"{len(checked_channels)} of {total} channels")
+
+        self.refresh_channel_dropdowns()
+        # If currently filtering by this group on the main guide, refresh guide view
+        cur_guide_data = self.guide_channel_combo.currentData() if hasattr(self, "guide_channel_combo") else None
+        if isinstance(cur_guide_data, tuple) and cur_guide_data[0] == "group" and cur_guide_data[1] == grp_name:
+            self._refresh_guide_view(keep_scroll=True)
+
+        self.flash_save_indicator(f"Saved {grp_name} ({len(checked_channels)} channels)")
+
+    def _select_all_group_channels(self):
+        if not hasattr(self, "group_channels_list") or not hasattr(self, "channel_group_combo"):
+            return
+        grp_name = self.channel_group_combo.currentText().strip()
+        if not grp_name:
+            return
+
+        self.group_channels_list.blockSignals(True)
+        all_channels = []
+        for i in range(self.group_channels_list.count()):
+            it = self.group_channels_list.item(i)
+            it.setCheckState(Qt.CheckState.Checked)
+            ch = it.data(Qt.ItemDataRole.UserRole)
+            if ch:
+                all_channels.append(ch)
+        self.group_channels_list.blockSignals(False)
+
+        self.config_mgr.save_channel_group(grp_name, all_channels)
+        if hasattr(self, "group_count_lbl"):
+            self.group_count_lbl.setText(f"{len(all_channels)} of {len(all_channels)} channels")
+
+        self.refresh_channel_dropdowns()
+        cur_guide_data = self.guide_channel_combo.currentData() if hasattr(self, "guide_channel_combo") else None
+        if isinstance(cur_guide_data, tuple) and cur_guide_data[0] == "group" and cur_guide_data[1] == grp_name:
+            self._refresh_guide_view(keep_scroll=True)
+        self.flash_save_indicator(f"All Channels Added to {grp_name}")
+
+    def _clear_all_group_channels(self):
+        if not hasattr(self, "group_channels_list") or not hasattr(self, "channel_group_combo"):
+            return
+        grp_name = self.channel_group_combo.currentText().strip()
+        if not grp_name:
+            return
+
+        self.group_channels_list.blockSignals(True)
+        for i in range(self.group_channels_list.count()):
+            it = self.group_channels_list.item(i)
+            it.setCheckState(Qt.CheckState.Unchecked)
+        self.group_channels_list.blockSignals(False)
+
+        self.config_mgr.save_channel_group(grp_name, [])
+        if hasattr(self, "group_count_lbl"):
+            total = self.group_channels_list.count()
+            self.group_count_lbl.setText(f"0 of {total} channels")
+
+        self.refresh_channel_dropdowns()
+        cur_guide_data = self.guide_channel_combo.currentData() if hasattr(self, "guide_channel_combo") else None
+        if isinstance(cur_guide_data, tuple) and cur_guide_data[0] == "group" and cur_guide_data[1] == grp_name:
+            self._refresh_guide_view(keep_scroll=True)
+        self.flash_save_indicator(f"Cleared Channels in {grp_name}")
+
+    def _create_new_channel_group(self):
+        name, ok = QInputDialog.getText(
+            self,
+            "New Channel Group",
+            "Enter a name for the new channel list (e.g. Sports, News, Movies):"
+        )
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+
+        if not self.config_mgr.create_channel_group(name):
+            QMessageBox.warning(
+                self,
+                "List Exists",
+                f"A channel list named '{name}' already exists. Please choose a different name."
+            )
+            return
+
+        self.refresh_channel_groups_ui()
+        idx = self.channel_group_combo.findText(name)
+        if idx >= 0:
+            self.channel_group_combo.setCurrentIndex(idx)
+        self.refresh_channel_dropdowns()
+        self.flash_save_indicator(f"Created '{name}'")
+
+    def _rename_current_channel_group(self):
+        if not hasattr(self, "channel_group_combo"):
+            return
+        cur_name = self.channel_group_combo.currentText().strip()
+        if not cur_name:
+            return
+
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Channel Group",
+            f"Enter new name for list '{cur_name}':",
+            QLineEdit.EchoMode.Normal,
+            cur_name
+        )
+        if not ok:
+            return
+        new_name = new_name.strip()
+        if not new_name or new_name == cur_name:
+            return
+
+        if not self.config_mgr.rename_channel_group(cur_name, new_name):
+            QMessageBox.warning(
+                self,
+                "Cannot Rename",
+                f"A channel list named '{new_name}' already exists or the name is invalid."
+            )
+            return
+
+        self.refresh_channel_groups_ui()
+        idx = self.channel_group_combo.findText(new_name)
+        if idx >= 0:
+            self.channel_group_combo.setCurrentIndex(idx)
+        self.refresh_channel_dropdowns()
+        self.flash_save_indicator(f"Renamed to '{new_name}'")
+
+    def _delete_current_channel_group(self):
+        if not hasattr(self, "channel_group_combo"):
+            return
+        cur_name = self.channel_group_combo.currentText().strip()
+        if not cur_name:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Delete Channel Group",
+            f"Are you sure you want to delete the '{cur_name}' channel list?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.config_mgr.delete_channel_group(cur_name)
+        self.refresh_channel_groups_ui()
+        self.refresh_channel_dropdowns()
+        self.flash_save_indicator(f"Deleted '{cur_name}'")
 
     # Subcategory 3: Automation & DVR
     def create_settings_automation_tab(self) -> QWidget:
@@ -12144,15 +12509,35 @@ class MainWindow(QMainWindow):
 
     def refresh_channel_dropdowns(self, reset_to_default: bool = False):
         channels = self.config_mgr.get_ordered_channels()
+        groups = self.config_mgr.get_channel_groups()
         if hasattr(self, "guide_channel_combo"):
-            cur_selected = "All" if reset_to_default else self.guide_channel_combo.currentText()
+            prev_data = None if reset_to_default else self.guide_channel_combo.currentData()
             self.guide_channel_combo.blockSignals(True)
             self.guide_channel_combo.clear()
-            self.guide_channel_combo.addItem("All")
-            self.guide_channel_combo.addItems(channels)
-            idx = 0 if reset_to_default else self.guide_channel_combo.findText(cur_selected)
-            if idx >= 0:
-                self.guide_channel_combo.setCurrentIndex(idx)
+
+            # 1. All Channels
+            self.guide_channel_combo.addItem("All Channels", ("all", None))
+
+            # 2. Channel Groups / Lists
+            if groups:
+                for grp_name, grp_ch_list in groups.items():
+                    cnt = len(grp_ch_list)
+                    self.guide_channel_combo.addItem(f"★ {grp_name} ({cnt})", ("group", grp_name))
+
+            # 3. Individual Channels
+            for ch in channels:
+                self.guide_channel_combo.addItem(f"    {ch}", ("channel", ch))
+
+            # Restore previous selection if possible
+            matched_idx = -1
+            if prev_data:
+                for i in range(self.guide_channel_combo.count()):
+                    if self.guide_channel_combo.itemData(i) == prev_data:
+                        matched_idx = i
+                        break
+
+            if matched_idx >= 0:
+                self.guide_channel_combo.setCurrentIndex(matched_idx)
             else:
                 self.guide_channel_combo.setCurrentIndex(0)
             self.guide_channel_combo.blockSignals(False)
@@ -13951,21 +14336,34 @@ class MainWindow(QMainWindow):
             pass
 
         query = self.guide_search_input.text().strip()
-        channel = self.guide_channel_combo.currentText()
         airdate = self.guide_date_combo.currentData()
+
+        # Resolve channel filter: 'all', ('group', group_name), or ('channel', channel_name)
+        combo_data = self.guide_channel_combo.currentData() if hasattr(self, "guide_channel_combo") else None
+        filter_channels = None
+        if isinstance(combo_data, tuple):
+            dtype, dval = combo_data
+            if dtype == "group":
+                filter_channels = self.config_mgr.get_channel_group(dval)
+            elif dtype == "channel":
+                filter_channels = [dval]
+        elif hasattr(self, "guide_channel_combo"):
+            txt = self.guide_channel_combo.currentText().strip()
+            if txt and not txt.startswith("All"):
+                filter_channels = [txt]
 
         # When viewing the grid for a specific date or today, don't trim earlier shows of that day.
         # In list mode with All Upcoming, trim ended programs.
         is_grid = (self.guide_stack.currentIndex() == 0)
         trim_ended = (not is_grid and airdate is None)
         programs = self.guide_service.search_programs(
-            query=query, channel=channel, airdate=airdate, trim_ended=trim_ended, include_overhang=is_grid
+            query=query, channel=filter_channels, airdate=airdate, trim_ended=trim_ended, include_overhang=is_grid
         )
 
         self.current_guide_items = programs
 
         if self.guide_stack.currentIndex() == 0:
-            self._populate_grid_guide(programs, airdate)
+            self._populate_grid_guide(programs, airdate, target_channels=filter_channels)
         else:
             self._populate_list_guide(programs)
 
@@ -14130,7 +14528,7 @@ class MainWindow(QMainWindow):
             if target_item:
                 self.guide_table.scrollToItem(target_item, QTableWidget.ScrollHint.PositionAtTop)
 
-    def _populate_grid_guide(self, programs: List[Dict[str, Any]], airdate: Optional[str], keep_scroll: bool = False):
+    def _populate_grid_guide(self, programs: List[Dict[str, Any]], airdate: Optional[str], keep_scroll: bool = False, target_channels: Optional[List[str]] = None):
         saved_h = self.guide_grid_table.horizontalScrollBar().value() if keep_scroll else 0
         saved_v = self.guide_grid_table.verticalScrollBar().value() if keep_scroll else 0
         active_scheduled = self.queue_mgr.get_active_scheduled_map()
@@ -14141,13 +14539,27 @@ class MainWindow(QMainWindow):
         self.guide_grid_table.clearContents()
 
         # Determine channels to display
-        filter_ch = self.guide_channel_combo.currentText()
-        if filter_ch and filter_ch != "All":
-            channels = [filter_ch]
+        if target_channels is not None:
+            channels = list(target_channels)
         else:
-            channels = list(self.config_mgr.get_ordered_channels())
-            if not channels:
-                channels = list(self.config_mgr.channel_map.keys())
+            combo_data = self.guide_channel_combo.currentData() if hasattr(self, "guide_channel_combo") else None
+            if isinstance(combo_data, tuple):
+                dtype, dval = combo_data
+                if dtype == "group":
+                    channels = self.config_mgr.get_channel_group(dval)
+                elif dtype == "channel":
+                    channels = [dval]
+                else:
+                    channels = list(self.config_mgr.get_ordered_channels())
+            else:
+                filter_ch = self.guide_channel_combo.currentText() if hasattr(self, "guide_channel_combo") else "All"
+                if filter_ch and not filter_ch.startswith("All"):
+                    channels = [filter_ch]
+                else:
+                    channels = list(self.config_mgr.get_ordered_channels())
+
+        if not channels:
+            channels = list(self.config_mgr.channel_map.keys())
 
         self.grid_channels = channels
         self.guide_grid_table.setRowCount(len(channels))

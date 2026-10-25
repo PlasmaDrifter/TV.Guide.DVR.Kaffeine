@@ -997,6 +997,152 @@ class QueueManager:
 
         return rec_data
 
+    def cancel_recording(self, queue_id: int, dbus_client: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+        """
+        Cancels a scheduled or in-progress recording.
+        If the recording has already started (RECORDING status or airtime reached)
+        and is not a temporary live timeshift stream:
+        - Halts broadcast capture in Kaffeine via D-Bus / sqlite to immediately free the tuner.
+        - Resolves and saves its recorded file_path.
+        - Updates end_iso to current timestamp and duration_iso to elapsed recorded time.
+        - Archives to recording_history so it is permanently preserved in history.
+        - Retains it in recording_queue as 'COMPLETED' for 6 hours (standard completion lifecycle).
+        - Returns dict with rec_data and stopped_in_progress=True.
+
+        If the recording has NOT started yet (QUEUED in the future) or is already COMPLETED / timeshift:
+        - Purges it completely from recording_queue and cancels any armed Kaffeine timer.
+        - Returns dict with rec_data and stopped_in_progress=False.
+        """
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM recording_queue WHERE id = ?", (queue_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return None
+        rec_data = dict(row)
+
+        now = datetime.now()
+        now_iso = now.strftime("%Y-%m-%dT%H:%M:%S")
+
+        status = rec_data.get("status")
+        is_timeshift = bool(rec_data.get("is_timeshift"))
+
+        # Determine if broadcast recording has started
+        has_started = False
+        if not is_timeshift:
+            if status == "RECORDING":
+                has_started = True
+            elif status in ("ARMED", "QUEUED"):
+                try:
+                    start_dt = datetime.fromisoformat(rec_data["start_iso"])
+                    if now >= start_dt:
+                        has_started = True
+                except Exception:
+                    pass
+
+        # 1. Halt capture in Kaffeine to immediately free the hardware tuner
+        if dbus_client:
+            try:
+                dbus_client.cancel_recording(
+                    key=rec_data.get("kaffeine_key"),
+                    channel=rec_data.get("channel"),
+                    title=rec_data.get("title")
+                )
+            except Exception as e:
+                print(f"Error cancelling Kaffeine recording via D-Bus: {e}")
+        elif rec_data.get("kaffeine_key"):
+            try:
+                k_db = Path.home() / ".local" / "share" / "kaffeine" / "sqlite.db"
+                if k_db.exists():
+                    k_conn = sqlite3.connect(str(k_db))
+                    k_cur = k_conn.cursor()
+                    k_cur.execute("DELETE FROM RecordingSchedule WHERE Id = ?", (rec_data["kaffeine_key"],))
+                    k_conn.commit()
+                    k_conn.close()
+            except Exception as e:
+                print(f"Error purging Kaffeine sqlite schedule: {e}")
+
+        # 2. If started, retain in recording_queue as COMPLETED for 6h and archive to history
+        if has_started:
+            try:
+                start_dt = datetime.fromisoformat(rec_data["start_iso"])
+                elapsed_secs = max(1, int((now - start_dt).total_seconds()))
+                bh = elapsed_secs // 3600
+                bm = (elapsed_secs % 3600) // 60
+                bs = elapsed_secs % 60
+                effective_dur_iso = f"{bh:02d}:{bm:02d}:{bs:02d}"
+            except Exception:
+                effective_dur_iso = rec_data.get("duration_iso", "00:00:00")
+
+            fpath = rec_data.get("file_path")
+            if not fpath:
+                try:
+                    from .storage_manager import StorageManager
+                    sm = StorageManager()
+                    resolved = sm.find_active_or_recent_recording_file(rec_data.get("title", ""))
+                    if resolved:
+                        fpath = str(resolved)
+                except Exception as e:
+                    print(f"Notice: Could not resolve recording file on cancellation: {e}")
+
+            # Update queue item to COMPLETED with end_iso=now_iso and actual recorded duration
+            cur.execute("""
+                UPDATE recording_queue
+                SET status = 'COMPLETED',
+                    end_iso = ?,
+                    duration_iso = ?,
+                    buffer_mins = 0,
+                    file_path = ?
+                WHERE id = ?
+            """, (now_iso, effective_dur_iso, fpath, queue_id))
+
+            # Insert into recording_history if not already present, or update existing
+            cur.execute(
+                "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
+                (rec_data.get("title", ""), rec_data.get("channel", ""), rec_data.get("start_iso", ""))
+            )
+            hist_row = cur.fetchone()
+            if not hist_row:
+                cur.execute("""
+                    INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    rec_data.get("title", ""),
+                    rec_data.get("channel", ""),
+                    rec_data.get("start_iso", ""),
+                    effective_dur_iso,
+                    rec_data.get("start_time_local", ""),
+                    now_iso,
+                    fpath,
+                    rec_data.get("protected", 0)
+                ))
+            else:
+                cur.execute("""
+                    UPDATE recording_history
+                    SET duration_iso = ?, file_path = COALESCE(?, file_path), completed_at = ?
+                    WHERE id = ?
+                """, (effective_dur_iso, fpath, now_iso, hist_row["id"]))
+
+            conn.commit()
+            conn.close()
+
+            rec_data["stopped_in_progress"] = True
+            rec_data["end_iso"] = now_iso
+            rec_data["duration_iso"] = effective_dur_iso
+            rec_data["file_path"] = fpath
+            rec_data["status"] = "COMPLETED"
+            return rec_data
+
+        # 3. If NOT started (future queued, timeshift, or already completed dismissal):
+        cur.execute("DELETE FROM recording_queue WHERE id = ?", (queue_id,))
+        conn.commit()
+        conn.close()
+
+        rec_data["stopped_in_progress"] = False
+        return rec_data
+
     def get_due_to_arm(self) -> List[Dict[str, Any]]:
         """
         Returns recordings in 'QUEUED' status where current_time >= (start_time - lead_time_mins)
@@ -1094,6 +1240,17 @@ class QueueManager:
         if rec:
             rec_dict = dict(rec)
             now_iso = datetime.now().isoformat()
+            fpath = rec_dict.get("file_path")
+            if not fpath:
+                try:
+                    from .storage_manager import StorageManager
+                    sm = StorageManager()
+                    resolved = sm.find_active_or_recent_recording_file(rec_dict.get("title", ""))
+                    if resolved:
+                        fpath = str(resolved)
+                        cur.execute("UPDATE recording_queue SET file_path = ? WHERE id = ?", (fpath, queue_id))
+                except Exception:
+                    pass
             # Avoid inserting duplicate history rows if already archived
             cur.execute(
                 "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
@@ -1110,7 +1267,7 @@ class QueueManager:
                     rec_dict.get("duration_iso", ""),
                     rec_dict.get("start_time_local", ""),
                     now_iso,
-                    rec_dict.get("file_path"),
+                    fpath,
                     rec_dict.get("protected", 0)
                 ))
             cur.execute("UPDATE recording_queue SET status = 'COMPLETED' WHERE id = ?", (queue_id,))

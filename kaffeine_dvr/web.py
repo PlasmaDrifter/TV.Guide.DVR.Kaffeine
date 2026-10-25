@@ -343,18 +343,11 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/api/schedule/"):
             try:
                 qid = int(path.split("/")[-1])
-                rec = self.server_obj.queue_mgr.get_recording(qid)
-                # Pass dbus_client to remove_recording so it cancels in Kaffeine via D-Bus immediately
-                self.server_obj.queue_mgr.remove_recording(qid, dbus_client=self.server_obj.dbus_client)
-                if self.server_obj.dbus_client and rec:
-                    self.server_obj.dbus_client.cancel_recording(
-                        key=rec.get("kaffeine_key"),
-                        channel=rec.get("channel"),
-                        title=rec.get("title")
-                    )
+                rec_info = self.server_obj.queue_mgr.cancel_recording(qid, dbus_client=self.server_obj.dbus_client)
                 self.server_obj.active_timeshift_sessions.pop(qid, None)
                 self.server_obj.notify_queue_changed()
-                self._send_json({"status": "cancelled", "id": qid})
+                status_res = "completed" if (rec_info and rec_info.get("stopped_in_progress")) else "cancelled"
+                self._send_json({"status": status_res, "id": qid})
                 return
             except Exception as e:
                 self._send_json({"error": str(e)}, status=400)

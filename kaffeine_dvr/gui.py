@@ -6537,7 +6537,7 @@ class MainWindow(QMainWindow):
 
         ctrl_bar.addStretch()
 
-        self.cancel_rec_btn = QPushButton("Cancel Selected Recording")
+        self.cancel_rec_btn = QPushButton("Cancel / Clear Recording")
         self.cancel_rec_btn.setStyleSheet("color: #ff5252; font-weight: bold; background-color: #2b181a; border: 1px solid #c62828; border-radius: 4px; padding: 4px 12px;")
         self.cancel_rec_btn.clicked.connect(self.cancel_selected_recording)
         ctrl_bar.addWidget(self.cancel_rec_btn)
@@ -6572,6 +6572,7 @@ class MainWindow(QMainWindow):
         self.rec_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.rec_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.rec_table.itemDoubleClicked.connect(self._on_rec_table_double_clicked)
+        self.rec_table.itemSelectionChanged.connect(self._update_rec_action_buttons)
         active_layout.addWidget(self.rec_table)
         self.rec_table_resize_filter = TableViewportResizeFilter(self._adjust_table_columns, self)
         self.rec_table.viewport().installEventFilter(self.rec_table_resize_filter)
@@ -12824,6 +12825,7 @@ class MainWindow(QMainWindow):
                     break
 
         self._adjust_table_columns()
+        self._update_rec_action_buttons()
 
         # Also refresh history table
         self.refresh_history(force=force)
@@ -13234,25 +13236,43 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"'{rec_title}' is now {state_str}.", 4000)
         self.refresh_recordings()
 
+    def _update_rec_action_buttons(self):
+        """Updates Active Schedule action button labels dynamically based on selected row state."""
+        if not hasattr(self, "cancel_rec_btn"):
+            return
+        row = self.rec_table.currentRow()
+        if row < 0:
+            self.cancel_rec_btn.setText("Cancel / Clear Recording")
+            return
+
+        title_it = self.rec_table.item(row, 1) or self.rec_table.item(row, 0)
+        qid = title_it.data(Qt.ItemDataRole.UserRole) if title_it else None
+        if qid is not None:
+            all_recs = self.queue_mgr.list_queue(include_completed=True)
+            rec = next((r for r in all_recs if r.get("id") == int(qid)), None)
+            if rec and rec.get("status") == "COMPLETED":
+                self.cancel_rec_btn.setText("Clear Selected Recording")
+                return
+        self.cancel_rec_btn.setText("Cancel Selected Recording")
+
     def cancel_selected_recording(self):
         row = self.rec_table.currentRow()
         if row < 0:
-            QMessageBox.warning(self, "Selection Required", "Please select a recording to cancel.")
+            QMessageBox.warning(self, "Selection Required", "Please select a recording to cancel or clear.")
             return
 
         title_it = self.rec_table.item(row, 1) or self.rec_table.item(row, 0)
         qid = title_it.data(Qt.ItemDataRole.UserRole) if title_it else None
         rec_title = self.rec_table.item(row, 1).text() if self.rec_table.item(row, 1) else (title_it.text() if title_it else "")
-        rec_info = self.queue_mgr.remove_recording(int(qid))
-        if rec_info:
-            self.dbus_client.cancel_recording(
-                key=rec_info.get("kaffeine_key"),
-                channel=rec_info.get("channel"),
-                title=rec_info.get("title")
-            )
+        rec_info = self.queue_mgr.cancel_recording(int(qid), dbus_client=self.dbus_client) if qid is not None else None
+        if rec_info and rec_info.get("stopped_in_progress"):
+            self.status_bar.showMessage(f"Stopped recording '{rec_title}'. Retained in schedule as Completed.", 4000)
+        elif rec_info and rec_info.get("status") == "COMPLETED":
+            self.status_bar.showMessage(f"Cleared completed recording '{rec_title}' from active schedule.", 3000)
         else:
-            self.dbus_client.cancel_recording(title=rec_title)
-        self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
+            if not rec_info:
+                self.dbus_client.cancel_recording(title=rec_title)
+            self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
         self.refresh_recordings()
         self._refresh_guide_view(keep_scroll=True)
         # Clear program detail panel / guide selection if active program matches cancelled recording
@@ -16456,14 +16476,11 @@ class MainWindow(QMainWindow):
 
         qid = rec_info.get("id")
         rec_title = rec_info.get("title") or prog.get("show_title", "")
-        removed_info = self.queue_mgr.remove_recording(int(qid))
-        target_info = removed_info or rec_info or {}
-        self.dbus_client.cancel_recording(
-            key=target_info.get("kaffeine_key"),
-            channel=target_info.get("channel") or prog.get("kaffeine_channel"),
-            title=target_info.get("title") or prog.get("show_title") or rec_title
-        )
-        self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
+        cancelled_info = self.queue_mgr.cancel_recording(int(qid), dbus_client=self.dbus_client)
+        if cancelled_info and cancelled_info.get("stopped_in_progress"):
+            self.status_bar.showMessage(f"Stopped recording '{rec_title}'. Retained in schedule as Completed.", 4000)
+        else:
+            self.status_bar.showMessage(f"Cancelled recording '{rec_title}'.", 3000)
         self.refresh_recordings()
         self._refresh_guide_view(keep_scroll=True)
         prog.pop("_scheduled_rec", None)

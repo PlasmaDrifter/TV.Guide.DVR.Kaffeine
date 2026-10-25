@@ -17335,11 +17335,17 @@ def ensure_desktop_launcher():
         apps_dir = (Path(xdg_data) if xdg_data else Path.home() / ".local" / "share") / "applications"
         desktop_file = apps_dir / "kaffeine-dvr.desktop"
 
+        appimage_path = os.environ.get("APPIMAGE")
+        if appimage_path and Path(appimage_path).is_file():
+            exec_line = f'"{Path(appimage_path).resolve()}"'
+        else:
+            exec_line = "sh -c 'PATH=\"$HOME/.local/bin:$PATH\" exec kaffeine-dvr'"
+
         content = (
             "[Desktop Entry]\n"
             "Categories=AudioVideo;TV;Recorder;\n"
             "Comment=Modern TV Guide & DVR Recording Manager for Kaffeine\n"
-            "Exec=sh -c 'PATH=\"$HOME/.local/bin:$PATH\" exec kaffeine-dvr'\n"
+            f"Exec={exec_line}\n"
             "GenericName=TV Guide & Recording Manager\n"
             "Icon=kaffeine-dvr\n"
             "Keywords=tv;dvr;kaffeine;record;guide;epg;\n"
@@ -17353,7 +17359,7 @@ def ensure_desktop_launcher():
         if not needs_write:
             try:
                 curr = desktop_file.read_text(encoding="utf-8")
-                if "Icon=kaffeine\n" in curr or curr.strip() == "Icon=kaffeine":
+                if curr.strip() != content.strip() or "Icon=kaffeine\n" in curr:
                     needs_write = True
             except Exception:
                 needs_write = True

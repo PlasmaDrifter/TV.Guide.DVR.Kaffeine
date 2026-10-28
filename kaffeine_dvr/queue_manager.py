@@ -183,6 +183,17 @@ class QueueManager:
 
         cur.execute("CREATE INDEX IF NOT EXISTS idx_hist_start ON recording_history(start_iso)")
 
+        # Deduplicate any duplicate history records that may have been created concurrently
+        cur.execute("""
+            DELETE FROM recording_history
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM recording_history
+                GROUP BY channel, start_iso
+            )
+        """)
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_channel_start ON recording_history(channel, start_iso)")
+
         # Delete any legacy PURGED records or COMPLETED records older than 6 hours
         cur.execute("DELETE FROM recording_queue WHERE status = 'PURGED'")
         cur.execute("""
@@ -1100,13 +1111,13 @@ class QueueManager:
 
             # Insert into recording_history if not already present, or update existing
             cur.execute(
-                "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
-                (rec_data.get("title", ""), rec_data.get("channel", ""), rec_data.get("start_iso", ""))
+                "SELECT id FROM recording_history WHERE channel = ? AND start_iso = ?",
+                (rec_data.get("channel", ""), rec_data.get("start_iso", ""))
             )
             hist_row = cur.fetchone()
             if not hist_row:
                 cur.execute("""
-                    INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                    INSERT OR IGNORE INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     rec_data.get("title", ""),
@@ -1253,12 +1264,13 @@ class QueueManager:
                     pass
             # Avoid inserting duplicate history rows if already archived
             cur.execute(
-                "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
-                (rec_dict.get("title", ""), rec_dict.get("channel", ""), rec_dict.get("start_iso", ""))
+                "SELECT id FROM recording_history WHERE channel = ? AND start_iso = ?",
+                (rec_dict.get("channel", ""), rec_dict.get("start_iso", ""))
             )
-            if not cur.fetchone():
+            existing_hist = cur.fetchone()
+            if not existing_hist:
                 cur.execute("""
-                    INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                    INSERT OR IGNORE INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     rec_dict.get("title", ""),
@@ -1270,6 +1282,13 @@ class QueueManager:
                     fpath,
                     rec_dict.get("protected", 0)
                 ))
+            else:
+                if fpath:
+                    cur.execute("""
+                        UPDATE recording_history
+                        SET file_path = COALESCE(file_path, ?)
+                        WHERE id = ?
+                    """, (fpath, existing_hist["id"]))
             cur.execute("UPDATE recording_queue SET status = 'COMPLETED' WHERE id = ?", (queue_id,))
             conn.commit()
         conn.close()
@@ -1324,10 +1343,11 @@ class QueueManager:
 
                         # Archive to history once if not already present
                         cur.execute(
-                            "SELECT id FROM recording_history WHERE title = ? AND channel = ? AND start_iso = ?",
-                            (rec.get("title", ""), rec.get("channel", ""), rec.get("start_iso", ""))
+                            "SELECT id FROM recording_history WHERE channel = ? AND start_iso = ?",
+                            (rec.get("channel", ""), rec.get("start_iso", ""))
                         )
-                        if not cur.fetchone():
+                        existing_hist = cur.fetchone()
+                        if not existing_hist:
                             fpath = rec.get("file_path")
                             if not fpath:
                                 try:
@@ -1341,7 +1361,7 @@ class QueueManager:
                                     pass
 
                             cur.execute("""
-                                INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+                                INSERT OR IGNORE INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 rec.get("title", ""),
@@ -1354,6 +1374,14 @@ class QueueManager:
                                 rec.get("protected", 0)
                             ))
                             archived_count += 1
+                        else:
+                            fpath = rec.get("file_path")
+                            if fpath:
+                                cur.execute("""
+                                    UPDATE recording_history
+                                    SET file_path = COALESCE(file_path, ?)
+                                    WHERE id = ?
+                                """, (fpath, existing_hist["id"]))
 
                     # Remove from queue only after 6 hours from end_dt
                     if now >= retention_cutoff:
@@ -1516,10 +1544,14 @@ class QueueManager:
         conn = self._get_connection()
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
+            INSERT OR IGNORE INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path, protected)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (title, channel, start_iso, duration_iso, start_time_local, comp, file_path, int(protected)))
         new_id = cur.lastrowid
+        if not new_id:
+            cur.execute("SELECT id FROM recording_history WHERE channel = ? AND start_iso = ?", (channel, start_iso))
+            row = cur.fetchone()
+            new_id = row[0] if row else 0
         conn.commit()
         conn.close()
 

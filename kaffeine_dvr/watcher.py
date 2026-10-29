@@ -375,16 +375,20 @@ class Watcher:
         recovered_count = 0
         cfg = self.config_mgr
 
-        # Check which streams are currently active in Kaffeine over D-Bus
+        # Check which streams are currently active or scheduled in Kaffeine over D-Bus
         running_stream_ids = set()
         running_stream_channels = set()
+        all_scheduled_stream_ids = set()
         if self.dbus_client.is_running():
             try:
                 active_dbus = self.dbus_client._list_via_dbus()
                 for entry in active_dbus:
+                    entry_id = entry.get("id")
+                    if entry_id is not None:
+                        all_scheduled_stream_ids.add(int(entry_id))
                     if entry.get("is_running"):
-                        if entry.get("id") is not None:
-                            running_stream_ids.add(int(entry["id"]))
+                        if entry_id is not None:
+                            running_stream_ids.add(int(entry_id))
                         e_ch = (entry.get("channel") or "").strip().lower()
                         if e_ch:
                             running_stream_channels.add(e_ch)
@@ -402,6 +406,12 @@ class Watcher:
             if k_key is not None and int(k_key) in running_stream_ids:
                 continue
 
+            # If the recording timer is already scheduled in Kaffeine, Kaffeine's internal timer
+            # (which polls every 5 seconds) may simply be in the process of starting capture.
+            # Do not recover a timer that already exists in Kaffeine.
+            if k_key is not None and int(k_key) in all_scheduled_stream_ids:
+                continue
+
             try:
                 start_dt = datetime.fromisoformat(rec["start_iso"])
                 end_dt = datetime.fromisoformat(rec["end_iso"])
@@ -411,6 +421,11 @@ class Watcher:
 
             # If show has not even reached its broadcast airtime yet, it is simply ARMED waiting to start
             if now < start_dt:
+                continue
+
+            # Grace period: Allow 30 seconds past scheduled start for Kaffeine's internal timer
+            # to start tuning and set is_running before declaring it interrupted
+            if (now - start_dt).total_seconds() < 30:
                 continue
 
             # If show has already ended, skip recovery (update_statuses will archive it)
@@ -510,6 +525,10 @@ class Watcher:
         self.reap_children()
         if hasattr(self.config_mgr, "reload_if_changed"):
             self.config_mgr.reload_if_changed()
+        cfg = ConfigManager()
+        # Update in-progress and completed statuses (archive finished to history and actively halt in Kaffeine)
+        status_res = self.queue_mgr.update_statuses([], max_history=cfg.max_history_entries, dbus_client=self.dbus_client)
+
         # Recover any active recordings interrupted mid-broadcast by a reboot or crash
         self.recover_interrupted_recordings()
         # Resolve any back-to-back buffer conflicts across different channels before arming
@@ -522,7 +541,6 @@ class Watcher:
         self.enforce_zero_byte_recording_cleanup()
         due = self.queue_mgr.get_due_to_arm()
         armed_count = 0
-        cfg = ConfigManager()
 
         for rec in due:
             title = rec["title"]
@@ -580,8 +598,6 @@ class Watcher:
                 now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{now_str}] Desktop notification sent for '{n_title}' on {n_channel} (lead: {lead_mins}m, persistent: {persistent}).", flush=True)
 
-        # Update in-progress and completed statuses (archive finished to history and actively halt in Kaffeine)
-        status_res = self.queue_mgr.update_statuses([], max_history=cfg.max_history_entries, dbus_client=self.dbus_client)
 
         # Enforce internal background minimization if configured (tray or taskbar)
         if cfg.launch_mode in ("taskbar", "tray") or getattr(cfg, "launch_minimized", False):

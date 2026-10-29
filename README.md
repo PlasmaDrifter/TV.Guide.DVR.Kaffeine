@@ -44,6 +44,14 @@ Kaffeine is a powerful digital TV viewer for KDE and Linux desktop environments,
   - **Sports Broadcast Auto-Extend**
   - **Per-Rule Custom Overrides**
 - **Series Auto-Record Rules**
+- **Channel Groups & Favorites Filtering:**
+  - Create and filter custom channel groups (Favorites, Sports, News, Movies) with live channel counts
+  - Toolbar quick-filtering dropdown integrated directly above the EPG grid
+  - Synchronized drag-and-drop channel order across groups and lineups
+- **Recording Schedule Management & History:**
+  - Active Schedule, All Scheduled, and History views with interactive column sorting
+  - Cancel or clear recordings dynamically with automatic retention of in-progress recordings as completed
+  - Deduplicated history tracking and automatic 6-hour visual confirmation retention
 - **Automated Video Retention & Storage Management:**
   - **Age Retention**
   - **Low-Disk Auto-Purge**

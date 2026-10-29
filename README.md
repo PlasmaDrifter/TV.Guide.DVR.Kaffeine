@@ -130,6 +130,21 @@ For local development or editable mode, pass the `-e` flag:
 ./install.sh -e
 ```
 
+### Updating
+
+#### AppImage
+Download the latest `.AppImage` from [GitHub Releases](https://github.com/PlasmaDrifter/TV.Guide.DVR.Kaffeine/releases), make it executable (`chmod +x`), and replace the older version.
+
+#### Source / Git Installation
+To update an existing source installation:
+```bash
+cd TV.Guide.DVR.Kaffeine
+git pull
+./install.sh
+systemctl --user restart kaffeine-dvr-watcher.service
+```
+Running `./install.sh` updates the package, desktop launchers, and service definitions. Restarting `kaffeine-dvr-watcher.service` ensures the running daemon uses the latest recording logic.
+
 ### Uninstallation
 To remove Kaffeine DVR:
 ```bash

@@ -95,6 +95,13 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.4": (
+        "## What's Changed in v0.9.4\n\n"
+        "• **Eliminated False Recovery & Duplicate Notifications**: Resolved an issue where scheduled recordings triggered two notifications (lead time alert followed by a false 'Recording Resumed' alert at start time). Added active schedule key checks and a 30-second start grace period to allow Kaffeine's internal timer to initiate capture cleanly.\n"
+        "• **In-Progress Recording Cancellation & Dynamic Action Button**: Cancelling an active recording retains it in the schedule as 'COMPLETED' for 6 hours, stores its video file path, and archives it to history. The queue action button now dynamically updates based on selection ('Cancel Selected Recording', 'Clear Selected Recording', or 'Cancel / Clear Recording').\n"
+        "• **Desktop Launcher & Plasma Pinning Fix**: Updated launcher generation so pinned panel icons and desktop launchers reliably target the currently executing version instead of stale AppImage paths.\n"
+        "• **Recording History Deduplication**: Added a unique constraint on channel and airtime, preventing concurrent duplicate history entries."
+    ),
     "0.9.3": (
         "## What's Changed in v0.9.3\n\n"
         "• **Channel Groups & Favorites Filtering**: Create, manage, and filter custom channel lists (e.g. Favorites, Sports, News) with live channel counts and direct integration into the main TV Guide toolbar dropdown menu.\n"

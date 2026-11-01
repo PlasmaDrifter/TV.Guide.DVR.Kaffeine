@@ -16304,8 +16304,6 @@ class MainWindow(QMainWindow):
 
         container = QWidget()
         container.setObjectName("guideContextMenuContainer")
-        container.setMinimumWidth(480)
-        container.setMaximumWidth(540)
         container.setStyleSheet(
             "QWidget#guideContextMenuContainer { background: transparent; } "
             "QLabel { background: transparent; }"
@@ -16316,7 +16314,6 @@ class MainWindow(QMainWindow):
 
         title_lbl = QLabel()
         title_lbl.setWordWrap(True)
-        title_lbl.setMaximumWidth(520)
         escaped_title = html.escape(primary_title)
         title_html = f"<span style='font-size: 16px; font-weight: bold; color: {title_color_hex};'>{escaped_title}</span>"
         if season and number:
@@ -16328,7 +16325,6 @@ class MainWindow(QMainWindow):
             sub_lbl = QLabel(f"&quot;{html.escape(secondary_sub)}&quot;")
             sub_lbl.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {text_secondary};")
             sub_lbl.setWordWrap(True)
-            sub_lbl.setMaximumWidth(520)
             layout.addWidget(sub_lbl)
 
         meta_parts = []
@@ -16342,7 +16338,6 @@ class MainWindow(QMainWindow):
             meta_lbl = QLabel(" • ".join(meta_parts))
             meta_lbl.setStyleSheet(f"font-size: 12px; color: {text_secondary};")
             meta_lbl.setWordWrap(True)
-            meta_lbl.setMaximumWidth(520)
             layout.addWidget(meta_lbl)
 
         divider = QFrame()
@@ -16359,7 +16354,6 @@ class MainWindow(QMainWindow):
 
         desc_lbl = QLabel(display_summary)
         desc_lbl.setWordWrap(True)
-        desc_lbl.setMaximumWidth(520)
         desc_lbl.setStyleSheet(f"font-size: 13px; color: {text_primary}; line-height: 1.4;")
         layout.addWidget(desc_lbl)
 
@@ -16392,24 +16386,28 @@ class MainWindow(QMainWindow):
         layout.addWidget(divider_bottom)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(6)
         btn_row.setContentsMargins(0, 2, 0, 2)
 
-        def _add_pill(text, bg_color, hover_color, pressed_color, callback, obj_name=""):
+        pill_widgets = []
+
+        def _add_pill(text, bg_color, hover_color, pressed_color, callback, obj_name="", tooltip=""):
             btn = QPushButton(text)
             if obj_name:
                 btn.setObjectName(obj_name)
+            if tooltip:
+                btn.setToolTip(tooltip)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setMinimumHeight(34)
+            btn.setMinimumHeight(32)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {bg_color};
                     color: #ffffff;
-                    font-size: 12.5px;
+                    font-size: 12px;
                     font-weight: 600;
-                    border-radius: 17px;
-                    padding: 6px 12px;
+                    border-radius: 16px;
+                    padding: 5px 9px;
                     border: 1px solid rgba(255, 255, 255, 0.12);
                 }}
                 QPushButton:hover {{
@@ -16421,6 +16419,7 @@ class MainWindow(QMainWindow):
             """)
             btn.clicked.connect(lambda checked=False, cb=callback: (menu.close(), cb()))
             btn_row.addWidget(btn)
+            pill_widgets.append(btn)
             return btn
 
         # 1. Watch / Tune pill first
@@ -16437,7 +16436,16 @@ class MainWindow(QMainWindow):
         cur_ts_ch = (self._active_timeshift.get("channel") or "").strip().lower() if has_active_ts else ""
         sel_ch = (channel or "").strip().lower()
         if has_active_ts and (cur_ts_ch == sel_ch or state == "live"):
-            _add_pill(f"Stop Timeshift ({self._active_timeshift.get('channel')})", "#475569", "#334155", "#1e293b", lambda: self.stop_timeshift_session(user_initiated=True), "guidePillStopTimeshift")
+            ts_channel = self._active_timeshift.get("channel", "")
+            _add_pill(
+                "Stop Timeshift",
+                "#475569",
+                "#334155",
+                "#1e293b",
+                lambda: self.stop_timeshift_session(user_initiated=True),
+                "guidePillStopTimeshift",
+                tooltip=f"Stop active timeshift session on channel {ts_channel}"
+            )
 
         # 2. Record Program pill second
         active_map = self.queue_mgr.get_active_scheduled_map()
@@ -16454,6 +16462,11 @@ class MainWindow(QMainWindow):
         _add_pill("Record Series", "#6366f1", "#4f46e5", "#4338ca", lambda: self.add_rule_from_selected_guide_item(prog), "guidePillRecordSeries")
 
         layout.addLayout(btn_row)
+
+        # Calculate required width based on actual button size hints so words are never cut off
+        needed_btn_w = sum(b.sizeHint().width() for b in pill_widgets) + max(0, len(pill_widgets) - 1) * 6 + 32
+        card_w = max(520, min(620, needed_btn_w))
+        container.setFixedWidth(card_w)
 
         header_action = QWidgetAction(menu)
         header_action.setDefaultWidget(container)

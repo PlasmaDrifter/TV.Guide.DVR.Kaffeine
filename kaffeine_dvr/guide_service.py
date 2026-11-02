@@ -12,6 +12,7 @@ import os
 import re
 import sqlite3
 import time
+import http.cookiejar
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,9 +22,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 try:
-    from .config import ConfigManager
+    from .config import ConfigManager, get_system_timezone
 except (ImportError, ValueError):
-    from kaffeine_dvr.config import ConfigManager
+    from kaffeine_dvr.config import ConfigManager, get_system_timezone
 
 
 def get_program_duration_mins(prog: Optional[Dict[str, Any]]) -> int:
@@ -227,6 +228,53 @@ class TVPassportProvider:
 
     USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
     _canonical_urls: Dict[str, str] = {}
+    _opener: Optional[urllib.request.OpenerDirector] = None
+    _active_timezone: Optional[str] = None
+    _cookie_jar: Optional[http.cookiejar.CookieJar] = None
+
+    @classmethod
+    def get_opener(cls, tz: Optional[str] = None) -> urllib.request.OpenerDirector:
+        """Returns an HTTP opener configured with a TV Passport timezone session."""
+        effective_tz = tz
+        if not effective_tz:
+            try:
+                cfg = ConfigManager()
+                effective_tz = cfg.get_effective_tvpassport_timezone()
+            except Exception:
+                effective_tz = get_system_timezone()
+
+        if cls._opener is not None and cls._active_timezone == effective_tz:
+            return cls._opener
+
+        cls._cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cls._cookie_jar))
+
+        # Synchronize timezone with TV Passport server session
+        try:
+            post_data = urllib.parse.urlencode({"timezone": effective_tz}).encode("utf-8")
+            tz_req = urllib.request.Request(
+                "https://www.tvpassport.com/my-passport/dashboard/save_timezone",
+                data=post_data,
+                headers={
+                    "User-Agent": cls.USER_AGENT,
+                    "Content-Type": "application/x-www-form-urlencoded"
+                }
+            )
+            with opener.open(tz_req, timeout=10) as resp:
+                pass
+        except Exception as e:
+            print(f"Warning: Failed to set TV Passport timezone to {effective_tz}: {e}")
+
+        cls._opener = opener
+        cls._active_timezone = effective_tz
+        return opener
+
+    @classmethod
+    def reset_session(cls):
+        """Invalidates the cached TV Passport HTTP session and cookie jar."""
+        cls._opener = None
+        cls._active_timezone = None
+        cls._cookie_jar = None
 
     @classmethod
     def _get_station_base_url(cls, station_id: str) -> str:
@@ -258,7 +306,7 @@ class TVPassportProvider:
         return fallback
 
     @classmethod
-    def check_health(cls, station_id: Optional[str] = None) -> Dict[str, Any]:
+    def check_health(cls, station_id: Optional[str] = None, tz: Optional[str] = None) -> Dict[str, Any]:
         """Checks responsiveness of TV Passport station listings endpoint."""
         if not station_id or not station_id.strip():
             return {
@@ -274,9 +322,10 @@ class TVPassportProvider:
         headers = {"User-Agent": cls.USER_AGENT}
         req = urllib.request.Request(url, headers=headers)
 
+        opener = cls.get_opener(tz)
         start_t = time.perf_counter()
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with opener.open(req, timeout=12) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 elapsed_ms = int((time.perf_counter() - start_t) * 1000)
                 html_snippet = resp.read(8192).decode("utf-8", errors="ignore")
                 if "tvpassport" in html_snippet.lower() or "list-group-item" in html_snippet:
@@ -302,7 +351,7 @@ class TVPassportProvider:
             }
 
     @classmethod
-    def fetch_station(cls, target_date: date, channel_alias: str, station_id: str) -> List[Dict[str, Any]]:
+    def fetch_station(cls, target_date: date, channel_alias: str, station_id: str, tz: Optional[str] = None) -> List[Dict[str, Any]]:
         """Parses scheduled programs for a specific station from TV Passport."""
         date_str = target_date.strftime("%Y-%m-%d")
         base = cls._get_station_base_url(station_id.strip())
@@ -310,8 +359,9 @@ class TVPassportProvider:
         headers = {"User-Agent": cls.USER_AGENT}
         req = urllib.request.Request(url, headers=headers)
 
+        opener = cls.get_opener(tz)
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with opener.open(req, timeout=15) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 page_html = resp.read().decode("utf-8", errors="ignore")
         except Exception as e:
             print(f"Error fetching TVPassport station {station_id} for {date_str}: {e}")
@@ -756,7 +806,8 @@ class GuideService:
         # 2. TV Passport
         passport_stations = self.config_mgr.tvpassport_stations
         first_station = next(iter(passport_stations.values()), None) if passport_stations else None
-        passport_health = TVPassportProvider.check_health(first_station)
+        passport_tz = self.config_mgr.get_effective_tvpassport_timezone()
+        passport_health = TVPassportProvider.check_health(first_station, tz=passport_tz)
         passport_count = self._count_programs_for_source("tvpassport")
         passport_health["cached_shows"] = passport_count
         passport_health["name"] = "TV Passport (Regional Stations)"
@@ -860,6 +911,7 @@ class GuideService:
         elif provider == "tvpassport":
             # Pure TV Passport for configured stations
             passport_stations = self.config_mgr.tvpassport_stations
+            passport_tz = self.config_mgr.get_effective_tvpassport_timezone()
             if not passport_stations:
                 error_msg = "TV Passport provider selected, but no station IDs are configured in Settings."
                 if progress_callback:
@@ -873,7 +925,7 @@ class GuideService:
 
                     for ch_alias, st_id in passport_stations.items():
                         try:
-                            pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id)
+                            pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id, tz=passport_tz)
                             all_programs.extend(pass_progs)
                         except Exception as e:
                             print(f"Error fetching TVPassport station {st_id} for {target_date}: {e}")
@@ -881,6 +933,7 @@ class GuideService:
         else:
             # Default "hybrid": TVMaze for unconfigured national networks + TV Passport for configured stations
             passport_stations = self.config_mgr.tvpassport_stations
+            passport_tz = self.config_mgr.get_effective_tvpassport_timezone()
             passport_channel_names = {k.strip().lower() for k in passport_stations}
 
             # Exclude channels from TVMaze if they are already handled by TV Passport
@@ -908,7 +961,7 @@ class GuideService:
                 # TV Passport for configured stations (includes yesterday overnight)
                 for ch_alias, st_id in passport_stations.items():
                     try:
-                        pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id)
+                        pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id, tz=passport_tz)
                         all_programs.extend(pass_progs)
                     except Exception as e:
                         print(f"Error fetching TVPassport station {st_id} for {target_date}: {e}")

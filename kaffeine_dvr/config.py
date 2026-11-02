@@ -13,6 +13,33 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_CHANNEL_MAP: Dict[str, str] = {}
 
+
+def get_system_timezone() -> str:
+    """Detect local system IANA timezone name."""
+    try:
+        target = os.path.realpath("/etc/localtime")
+        if "zoneinfo/" in target:
+            return target.split("zoneinfo/", 1)[1]
+    except Exception:
+        pass
+    try:
+        tz_file = Path("/etc/timezone")
+        if tz_file.exists():
+            content = tz_file.read_text().strip()
+            if content:
+                return content
+    except Exception:
+        pass
+    try:
+        from datetime import datetime
+        tz = datetime.now().astimezone().tzinfo
+        if hasattr(tz, "key") and tz.key:
+            return tz.key
+    except Exception:
+        pass
+    return "America/Phoenix"
+
+
 DEFAULT_CATEGORY_COLORS = {
     "sports": "#ffa028",
     "news": "#4fc3f7",
@@ -679,6 +706,8 @@ class ConfigManager:
                         data["schedules_direct"] = {"username": "", "password": "", "lineup": ""}
                     if "tvpassport_stations" not in data:
                         data["tvpassport_stations"] = {}
+                    if "tvpassport_timezone" not in data:
+                        data["tvpassport_timezone"] = ""
                     if "lead_time_mins" not in data:
                         data["lead_time_mins"] = 10
                     if "launch_minimized" not in data:
@@ -814,6 +843,7 @@ class ConfigManager:
                 "lineup": ""
             },
             "tvpassport_stations": {},
+            "tvpassport_timezone": "",
             "first_run_completed": False,
             "auto_cleanup_enabled": False,
             "retention_days": 7,
@@ -868,6 +898,7 @@ class ConfigManager:
         cur_channels = self.data.get("channel_map", DEFAULT_CHANNEL_MAP.copy())
         cur_rules = self.data.get("rules", [])
         cur_passport = self.data.get("tvpassport_stations", {})
+        cur_passport_tz = self.data.get("tvpassport_timezone", "")
         cur_first_run = self.data.get("first_run_completed", True)
 
         defaults = self.get_default_config()
@@ -875,6 +906,7 @@ class ConfigManager:
             defaults["channel_map"] = cur_channels
             defaults["rules"] = cur_rules
             defaults["tvpassport_stations"] = cur_passport
+            defaults["tvpassport_timezone"] = cur_passport_tz
             defaults["first_run_completed"] = cur_first_run
 
         self.data = defaults
@@ -1165,6 +1197,23 @@ class ConfigManager:
     def tvpassport_stations(self, val: Dict[str, str]):
         self.data["tvpassport_stations"] = val
         self.save()
+
+    @property
+    def tvpassport_timezone(self) -> str:
+        """Configured timezone override for TV Passport (empty string for auto-detect)."""
+        return self.data.get("tvpassport_timezone", "")
+
+    @tvpassport_timezone.setter
+    def tvpassport_timezone(self, val: str):
+        self.data["tvpassport_timezone"] = val.strip() if val else ""
+        self.save()
+
+    def get_effective_tvpassport_timezone(self) -> str:
+        """Returns the configured timezone, or auto-detected system timezone if unset/auto."""
+        cfg_tz = self.tvpassport_timezone
+        if cfg_tz and cfg_tz.lower() not in ("auto", "system", ""):
+            return cfg_tz
+        return get_system_timezone()
 
     @property
     def launch_mode(self) -> str:

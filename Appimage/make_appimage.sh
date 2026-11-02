@@ -48,7 +48,7 @@ cat << DESK > AppDir/kaffeine-dvr.desktop
 [Desktop Entry]
 Name=Kaffeine DVR and TV Guide
 GenericName=TV Guide and Recording Manager
-Comment=Modern TV Guide browser & Just-In-Time DVR daemon for Kaffeine
+Comment=Modern TV Guide & DVR
 Exec=kaffeine-dvr %U
 Icon=kaffeine-dvr
 Terminal=false

@@ -68,7 +68,7 @@ chmod +x "$DEB_ROOT/usr/bin/kaffeine-dvr"
 cat << 'EOF' > "$DEB_ROOT/usr/share/applications/kaffeine-dvr.desktop"
 [Desktop Entry]
 Categories=AudioVideo;TV;Recorder;
-Comment=Modern TV Guide & DVR Recording Manager for Kaffeine
+Comment=Modern TV Guide & DVR
 Exec=kaffeine-dvr
 GenericName=TV Guide & Recording Manager
 Icon=kaffeine-dvr

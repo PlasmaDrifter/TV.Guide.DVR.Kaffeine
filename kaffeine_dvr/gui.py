@@ -117,9 +117,10 @@ try:
         DEFAULT_SHORTCUTS,
         THEME_PRESETS,
         ConfigManager,
+        get_system_timezone,
     )
     from .dbus_client import KaffeineDbusClient
-    from .guide_service import GuideService, get_program_duration_mins
+    from .guide_service import GuideService, TVPassportProvider, get_program_duration_mins
     from .queue_manager import QueueManager
     from .rules_engine import RulesEngine
     from .signal_scanner import ChannelSignalScanWorker, DvbSignalReader
@@ -133,9 +134,10 @@ except (ImportError, ValueError):
         DEFAULT_SHORTCUTS,
         THEME_PRESETS,
         ConfigManager,
+        get_system_timezone,
     )
     from kaffeine_dvr.dbus_client import KaffeineDbusClient
-    from kaffeine_dvr.guide_service import GuideService, get_program_duration_mins
+    from kaffeine_dvr.guide_service import GuideService, TVPassportProvider, get_program_duration_mins
     from kaffeine_dvr.queue_manager import QueueManager
     from kaffeine_dvr.rules_engine import RulesEngine
     from kaffeine_dvr.signal_scanner import ChannelSignalScanWorker, DvbSignalReader
@@ -7359,11 +7361,50 @@ class MainWindow(QMainWindow):
 
         pass_layout.addWidget(left_col_widget, stretch=5)
 
-        # Right Column: Station Mappings Editor & Save Button
+        # Right Column: Station Mappings Editor, Timezone Selector & Save Button
         right_col_widget = QWidget()
         right_col_layout = QVBoxLayout(right_col_widget)
         right_col_layout.setContentsMargins(0, 0, 0, 0)
         right_col_layout.setSpacing(8)
+
+        tz_row = QHBoxLayout()
+        tz_row.setSpacing(8)
+        tz_lbl = QLabel("Schedule Timezone:")
+        tz_lbl.setStyleSheet("color: #9cb0c6; font-weight: bold;")
+        tz_row.addWidget(tz_lbl)
+
+        self.passport_tz_combo = ThemedComboBox()
+        self.passport_tz_combo.setToolTip("Timezone used when retrieving station listings from TV Passport")
+        sys_tz = get_system_timezone()
+        tz_options = [
+            (f"Auto / System ({sys_tz})", ""),
+            ("America/Phoenix (Arizona - MST)", "America/Phoenix"),
+            ("America/Los_Angeles (Pacific Time)", "America/Los_Angeles"),
+            ("America/Denver (Mountain Time)", "America/Denver"),
+            ("America/Chicago (Central Time)", "America/Chicago"),
+            ("America/New_York (Eastern Time)", "America/New_York"),
+            ("America/Anchorage (Alaska Time)", "America/Anchorage"),
+            ("Pacific/Honolulu (Hawaii Time)", "Pacific/Honolulu"),
+            ("America/Halifax (Atlantic Time)", "America/Halifax"),
+            ("UTC", "UTC"),
+        ]
+        for label, val in tz_options:
+            self.passport_tz_combo.addItem(label, val)
+
+        saved_tz = self.config_mgr.tvpassport_timezone
+        match_idx = 0
+        if saved_tz:
+            for i in range(self.passport_tz_combo.count()):
+                if self.passport_tz_combo.itemData(i) == saved_tz:
+                    match_idx = i
+                    break
+            else:
+                self.passport_tz_combo.addItem(saved_tz, saved_tz)
+                match_idx = self.passport_tz_combo.count() - 1
+        self.passport_tz_combo.setCurrentIndex(match_idx)
+        self.passport_tz_combo.currentIndexChanged.connect(self._on_passport_tz_changed)
+        tz_row.addWidget(self.passport_tz_combo, stretch=1)
+        right_col_layout.addLayout(tz_row)
 
         mapping_hdr = QLabel("<b>Station ID Setup (Guide Name = Station ID):</b>")
         mapping_hdr.setStyleSheet("color: #9cb0c6; font-weight: bold;")
@@ -7376,7 +7417,7 @@ class MainWindow(QMainWindow):
         self.passport_stations_text.setMinimumHeight(300)
         right_col_layout.addWidget(self.passport_stations_text)
 
-        save_pass_btn = QPushButton("Save Station IDs")
+        save_pass_btn = QPushButton("Save Station IDs & Timezone")
         save_pass_btn.setObjectName("primaryActionBtn")
         save_pass_btn.clicked.connect(self.save_tvpassport_settings)
         pass_btn_row = QHBoxLayout()
@@ -10699,7 +10740,23 @@ class MainWindow(QMainWindow):
         self.update_tvpassport_notice()
         self.flash_save_indicator("Warnings Cleared")
 
+    def _on_passport_tz_changed(self):
+        new_tz = self.passport_tz_combo.currentData() or ""
+        if new_tz != self.config_mgr.tvpassport_timezone:
+            self.config_mgr.tvpassport_timezone = new_tz
+            try:
+                TVPassportProvider.reset_session()
+            except Exception:
+                pass
+
     def save_tvpassport_settings(self):
+        selected_tz = self.passport_tz_combo.currentData() or ""
+        self.config_mgr.tvpassport_timezone = selected_tz
+        try:
+            TVPassportProvider.reset_session()
+        except Exception:
+            pass
+
         raw = self.passport_stations_text.toPlainText()
         stations = {}
         for line in raw.splitlines():
@@ -10726,11 +10783,12 @@ class MainWindow(QMainWindow):
 
         # Automatically sync guide in background so listings for the new channel are downloaded immediately
         QTimer.singleShot(400, self.sync_guide)
-        self.flash_save_indicator("Station IDs Saved")
+        self.flash_save_indicator("Settings Saved")
 
+        eff_tz = self.config_mgr.get_effective_tvpassport_timezone()
         QMessageBox.information(
             self, "Saved & Syncing",
-            f"Saved {len(stations)} TV Passport station mapping(s).\n\n"
+            f"Saved TV Passport settings ({eff_tz}) and {len(stations)} station mapping(s).\n\n"
             f"TV Guide sync has been started in the background to fetch listings immediately."
         )
 
@@ -17357,7 +17415,7 @@ def ensure_desktop_launcher():
         content = (
             "[Desktop Entry]\n"
             "Categories=AudioVideo;TV;Recorder;\n"
-            "Comment=Modern TV Guide & DVR Recording Manager for Kaffeine\n"
+            "Comment=Modern TV Guide & DVR\n"
             f"Exec={exec_line}\n"
             "GenericName=TV Guide & Recording Manager\n"
             "Icon=kaffeine-dvr\n"

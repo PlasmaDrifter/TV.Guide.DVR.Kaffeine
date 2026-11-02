@@ -95,6 +95,13 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.5": (
+        "## What's Changed in v0.9.5\n\n"
+        "• **TV Passport Timezone Synchronization**: Integrated automatic session-based timezone negotiation with TV Passport, preventing broadcast schedules from reverting to Pacific Time after Daylight Saving Time transitions and ensuring local airtimes (such as Arizona MST) remain accurate year-round.\n"
+        "• **Configurable Guide Timezone Selector**: Added a dedicated Schedule Timezone dropdown in Settings > Guide Sources > TV Passport, supporting automatic system timezone detection as well as explicit timezone overrides.\n"
+        "• **Desktop Launcher Description Update**: Standardized desktop launcher comment and package metadata to 'Modern TV Guide & DVR'.\n"
+        "• **DVR Queue Schedule Alignment**: Re-evaluated and realigned queued DVR recordings to match synchronized station airtimes."
+    ),
     "0.9.4": (
         "## What's Changed in v0.9.4\n\n"
         "• **Eliminated False Recovery & Duplicate Notifications**: Resolved an issue where scheduled recordings triggered two notifications (lead time alert followed by a false 'Recording Resumed' alert at start time). Added active schedule key checks and a 30-second start grace period to allow Kaffeine's internal timer to initiate capture cleanly.\n"

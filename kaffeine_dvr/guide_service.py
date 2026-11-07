@@ -924,8 +924,13 @@ class GuideService:
                         progress_callback(f"Fetching TV Passport schedules for {date_label} ({i + 1}/{days})...")
 
                     for ch_alias, st_id in passport_stations.items():
+                        target_ch = ch_alias
+                        for k in self.channel_map:
+                            if k.strip().lower() == ch_alias.strip().lower():
+                                target_ch = k
+                                break
                         try:
-                            pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id, tz=passport_tz)
+                            pass_progs = TVPassportProvider.fetch_station(target_date, target_ch, st_id, tz=passport_tz)
                             all_programs.extend(pass_progs)
                         except Exception as e:
                             print(f"Error fetching TVPassport station {st_id} for {target_date}: {e}")
@@ -960,8 +965,13 @@ class GuideService:
 
                 # TV Passport for configured stations (includes yesterday overnight)
                 for ch_alias, st_id in passport_stations.items():
+                    target_ch = ch_alias
+                    for k in self.channel_map:
+                        if k.strip().lower() == ch_alias.strip().lower():
+                            target_ch = k
+                            break
                     try:
-                        pass_progs = TVPassportProvider.fetch_station(target_date, ch_alias, st_id, tz=passport_tz)
+                        pass_progs = TVPassportProvider.fetch_station(target_date, target_ch, st_id, tz=passport_tz)
                         all_programs.extend(pass_progs)
                     except Exception as e:
                         print(f"Error fetching TVPassport station {st_id} for {target_date}: {e}")
@@ -1130,16 +1140,17 @@ class GuideService:
     def delete_channel_programs(self, channel_names: List[str]) -> int:
         """
         Explicitly removes all cached guide programs for the specified channel names.
-        Matches against both kaffeine_channel and network.
+        Matches case-insensitively against both kaffeine_channel and network.
         """
         if not channel_names:
             return 0
         conn = self._get_connection()
         cur = conn.cursor()
         placeholders = ",".join("?" for _ in channel_names)
+        names_lower = [c.strip().lower() for c in channel_names]
         cur.execute(
-            f"DELETE FROM guide_programs WHERE kaffeine_channel IN ({placeholders}) OR network IN ({placeholders})",
-            list(channel_names) + list(channel_names)
+            f"DELETE FROM guide_programs WHERE LOWER(kaffeine_channel) IN ({placeholders}) OR LOWER(network) IN ({placeholders})",
+            names_lower + names_lower
         )
         count = cur.rowcount
         conn.commit()

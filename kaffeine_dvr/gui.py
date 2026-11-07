@@ -8054,19 +8054,24 @@ class MainWindow(QMainWindow):
 
         # Update channel_map in config and guide_service
         cur_map = dict(self.config_mgr.channel_map)
-        new_map = {k: v for k, v in cur_map.items() if k != ch_name and v != ch_name}
+        ch_lower = ch_name.strip().lower()
+        new_map = {
+            k: v for k, v in cur_map.items()
+            if k.strip().lower() != ch_lower and v.strip().lower() != ch_lower
+        }
         self.config_mgr.channel_map = new_map
         self.guide_service.set_channel_map(new_map)
 
-        # Remove from tvpassport_stations if present
-        cur_passport = dict(self.config_mgr.tvpassport_stations)
-        if ch_name in cur_passport:
-            del cur_passport[ch_name]
-            self.config_mgr.tvpassport_stations = cur_passport
-            self.update_tvpassport_notice()
+        # Remove from tvpassport_stations if present (case-insensitive)
+        cur_passport = {
+            k: v for k, v in self.config_mgr.tvpassport_stations.items()
+            if k.strip().lower() != ch_lower
+        }
+        self.config_mgr.tvpassport_stations = cur_passport
+        self.update_tvpassport_notice()
 
         # Prune cached database programs for this channel
-        self.guide_service.delete_channel_programs([ch_name])
+        self.guide_service.delete_channel_programs([ch_name, ch_name.upper(), ch_name.lower(), ch_name.capitalize()])
 
         # Prune from custom channel groups / favorites
         self.config_mgr.prune_channel_from_groups(ch_name)
@@ -10765,13 +10770,25 @@ class MainWindow(QMainWindow):
                 k, v = line.split("=", 1)
                 if k.strip() and v.strip():
                     stations[k.strip()] = v.strip()
-        self.config_mgr.tvpassport_stations = stations
 
         # Ensure station names exist in channel_map so they immediately appear in all dropdowns
         cur_map = dict(self.config_mgr.channel_map)
-        for st_name in stations:
-            if st_name not in cur_map:
-                cur_map[st_name] = st_name
+        normalized_stations = {}
+        for st_name, st_id in stations.items():
+            st_clean = st_name.strip()
+            # Match case-insensitively against existing channel_map keys and values
+            matched_key = None
+            for k, v in cur_map.items():
+                if k.strip().lower() == st_clean.lower() or v.strip().lower() == st_clean.lower():
+                    matched_key = k
+                    break
+            if matched_key:
+                normalized_stations[matched_key] = st_id
+            else:
+                cur_map[st_clean] = st_clean
+                normalized_stations[st_clean] = st_id
+
+        self.config_mgr.tvpassport_stations = normalized_stations
         self.config_mgr.channel_map = cur_map
         self.guide_service.set_channel_map(cur_map)
         if hasattr(self, "mapping_text"):
@@ -10821,10 +10838,12 @@ class MainWindow(QMainWindow):
         self.guide_service.set_channel_map(new_map)
 
         if removed_channels:
-            # Clean up tvpassport stations for removed channels
-            cur_passport = dict(self.config_mgr.tvpassport_stations)
-            for r_ch in removed_channels:
-                cur_passport.pop(r_ch, None)
+            # Clean up tvpassport stations for removed channels (case-insensitive)
+            removed_lower = {r.strip().lower() for r in removed_channels}
+            cur_passport = {
+                k: v for k, v in self.config_mgr.tvpassport_stations.items()
+                if k.strip().lower() not in removed_lower
+            }
             self.config_mgr.tvpassport_stations = cur_passport
             # Delete cached database records for removed channels
             self.guide_service.delete_channel_programs(list(removed_channels))
@@ -10855,6 +10874,21 @@ class MainWindow(QMainWindow):
         for ch in channels:
             ch_name = ch["name"].strip()
             current_map[ch_name] = ch_name
+
+        # Align tvpassport_stations keys if any differ only by case
+        cur_passport = dict(self.config_mgr.tvpassport_stations)
+        aligned_passport = {}
+        for p_k, p_v in cur_passport.items():
+            matched = False
+            for ch_name in current_map:
+                if ch_name.lower() == p_k.lower():
+                    aligned_passport[ch_name] = p_v
+                    matched = True
+                    break
+            if not matched:
+                aligned_passport[p_k] = p_v
+        if aligned_passport != cur_passport:
+            self.config_mgr.tvpassport_stations = aligned_passport
 
         new_valid = set(current_map.keys()) | set(current_map.values())
         updated_order = [ch for ch in self.config_mgr.channel_order if ch in new_valid]

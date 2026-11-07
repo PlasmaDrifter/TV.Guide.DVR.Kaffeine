@@ -994,11 +994,19 @@ class ConfigManager:
     def channel_order(self, val: List[str]):
         if self.channel_map:
             val_to_key = {v: k for k, v in self.channel_map.items()}
+            val_to_key_lower = {v.lower(): k for k, v in self.channel_map.items()}
+            key_lower_to_key = {k.lower(): k for k in self.channel_map.keys()}
             normalized = []
+            seen_lower = set()
             for ch in val:
-                resolved = ch if ch in self.channel_map else val_to_key.get(ch, ch)
-                if resolved not in normalized:
+                ch_lower = ch.strip().lower()
+                resolved = ch if ch in self.channel_map else (
+                    val_to_key.get(ch) or key_lower_to_key.get(ch_lower) or val_to_key_lower.get(ch_lower, ch)
+                )
+                res_lower = resolved.strip().lower()
+                if res_lower not in seen_lower:
                     normalized.append(resolved)
+                    seen_lower.add(res_lower)
             self.data["channel_order"] = normalized
         else:
             self.data["channel_order"] = val
@@ -1009,23 +1017,36 @@ class ConfigManager:
         Returns all unique channels in configured manual order.
         Strictly reflects the guide display names configured in channel_map (Channel Importing).
         Any active channels not yet in channel_order are appended to the end.
+        Guarantees case-insensitive channel uniqueness to prevent duplicate rows.
         """
         if not self.channel_map:
             return []
 
         val_to_key = {v: k for k, v in self.channel_map.items()}
+        val_to_key_lower = {v.lower(): k for k, v in self.channel_map.items()}
+        key_lower_to_key = {k.lower(): k for k in self.channel_map.keys()}
         guide_keys = list(self.channel_map.keys())
 
         saved_order = self.channel_order
         ordered = []
+        seen_lower = set()
+
         for ch in saved_order:
-            display_name = ch if ch in self.channel_map else val_to_key.get(ch)
-            if display_name and display_name in guide_keys and display_name not in ordered:
+            ch_lower = ch.strip().lower()
+            if ch_lower in seen_lower:
+                continue
+            display_name = ch if ch in self.channel_map else (
+                val_to_key.get(ch) or key_lower_to_key.get(ch_lower) or val_to_key_lower.get(ch_lower)
+            )
+            if display_name and display_name in guide_keys and display_name.strip().lower() not in seen_lower:
                 ordered.append(display_name)
+                seen_lower.add(display_name.strip().lower())
 
         for ch in guide_keys:
-            if ch not in ordered:
+            ch_lower = ch.strip().lower()
+            if ch_lower not in seen_lower:
                 ordered.append(ch)
+                seen_lower.add(ch_lower)
 
         return ordered
 

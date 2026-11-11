@@ -203,8 +203,51 @@ class KaffeineDbusClient:
             return False
 
     def _get_display_env(self) -> Dict[str, str]:
-        """Ensure WAYLAND_DISPLAY, DISPLAY, XAUTHORITY, QT_QPA_PLATFORM, and KDE desktop environment variables exist."""
+        """
+        Ensure WAYLAND_DISPLAY, DISPLAY, XAUTHORITY, QT_QPA_PLATFORM, and KDE desktop environment variables exist.
+        Also sanitizes AppImage and PyInstaller environment variables (e.g. LD_LIBRARY_PATH, APPDIR,
+        QT_PLUGIN_PATH) so spawned external system applications (e.g. Kaffeine, SMPlayer, MPV, VLC, xdotool, kdotool)
+        execute cleanly against system libraries and do not crash with SIGBUS when the AppImage FUSE mount unmounts.
+        """
         env = os.environ.copy()
+
+        # Sanitize AppImage and PyInstaller runtime environment variables for external processes.
+        # External host binaries must NOT inherit bundled shared libraries or temporary FUSE mount paths.
+        # Otherwise, when the AppImage GUI exits and unmounts /tmp/.mount_*, external processes crash with SIGBUS.
+        appdir = env.get("APPDIR") or ""
+        mount_prefix = "/tmp/.mount_"
+
+        # 1. Clean LD_LIBRARY_PATH: remove temporary AppImage mounts and bundled PyInstaller internal directories
+        ld_path = env.get("LD_LIBRARY_PATH", "")
+        if ld_path:
+            clean_ld = [
+                p for p in ld_path.split(os.pathsep)
+                if p and not p.startswith(mount_prefix) and "_internal" not in p and (not appdir or not p.startswith(appdir))
+            ]
+            if clean_ld:
+                env["LD_LIBRARY_PATH"] = os.pathsep.join(clean_ld)
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
+
+        # 2. Clean PATH: remove temporary AppImage mount paths
+        path_val = env.get("PATH", "")
+        if path_val:
+            clean_path = [
+                p for p in path_val.split(os.pathsep)
+                if p and not p.startswith(mount_prefix) and (not appdir or not p.startswith(appdir))
+            ]
+            env["PATH"] = os.pathsep.join(clean_path)
+
+        # 3. Strip AppImage & PyInstaller runtime variables so child processes behave as native host applications
+        for var in ("APPDIR", "APPIMAGE", "ARGV0", "OWD", "LD_LIBRARY_PATH_ORIG", "PATH_ORIG", "PYTHONHOME", "PYTHONPATH"):
+            env.pop(var, None)
+
+        # 4. Strip bundled Qt plugin / QML paths so Qt5 apps (e.g. Kaffeine) link and load cleanly without Qt6 conflicts
+        for qt_var in ("QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "QT_QUICK_CONTROLS_CONF"):
+            val = env.get(qt_var, "")
+            if val and (val.startswith(mount_prefix) or (appdir and val.startswith(appdir)) or "_internal" in val):
+                env.pop(qt_var, None)
+
         runtime_dir_str = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
         runtime_dir = Path(runtime_dir_str)
 

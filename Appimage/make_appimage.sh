@@ -74,6 +74,8 @@ fi
 cat << 'APPRUN' > AppDir/AppRun
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "${0}")")"
+export PATH_ORIG="${PATH_ORIG:-$PATH}"
+export LD_LIBRARY_PATH_ORIG="${LD_LIBRARY_PATH_ORIG:-$LD_LIBRARY_PATH}"
 export PATH="${HERE}/usr/bin:${PATH}"
 export LD_LIBRARY_PATH="${HERE}/usr/bin/_internal:${HERE}/usr/lib:${LD_LIBRARY_PATH}"
 

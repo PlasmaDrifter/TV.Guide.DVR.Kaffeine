@@ -14,6 +14,7 @@ def test_parse_version_tuple():
     assert parse_version_tuple("v0.9.3") == (0, 9, 3)
     assert parse_version_tuple("v0.9.4") == (0, 9, 4)
     assert parse_version_tuple("v0.9.5") == (0, 9, 5)
+    assert parse_version_tuple("v0.9.6") == (0, 9, 6)
     assert parse_version_tuple("v1.0.0") == (1, 0, 0)
 
     # Comparison tests
@@ -31,5 +32,6 @@ def test_parse_version_tuple():
     assert parse_version_tuple("v0.9.3") > parse_version_tuple("v0.9.2")
     assert parse_version_tuple("v0.9.4") > parse_version_tuple("v0.9.3")
     assert parse_version_tuple("v0.9.5") > parse_version_tuple("v0.9.4")
+    assert parse_version_tuple("v0.9.6") > parse_version_tuple("v0.9.5")
     assert parse_version_tuple("v0.8.5") == parse_version_tuple("0.8.5")
 

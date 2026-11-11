@@ -95,6 +95,12 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.6": (
+        "## What's Changed in v0.9.6\n\n"
+        "• **External Process Environment Sanitization (SIGBUS Crash Prevention)**: Sanitized the process execution environment in `_get_display_env()` when spawning external system binaries (Kaffeine, SMPlayer, MPV, VLC, xdotool, kdotool). Stripped temporary AppImage FUSE mounts, PyInstaller internal library directories, and bundled Qt6 plugin paths from `LD_LIBRARY_PATH`, `PATH`, and related variables, preventing fatal `SIGBUS` errors when the AppImage GUI exits and unmounts.\n"
+        "• **Preserved Clean Host Environment in AppRun**: Updated the AppImage launcher script to preserve original system `PATH` and `LD_LIBRARY_PATH` variables (`PATH_ORIG`, `LD_LIBRARY_PATH_ORIG`).\n"
+        "• **Case-Insensitive Channel Uniqueness**: Added case-insensitive deduplication and alignment across channel ordering, Kaffeine channel imports, TV Passport station settings, and guide program caching to prevent duplicate channels with differing casing from reappearing after deletion."
+    ),
     "0.9.5": (
         "## What's Changed in v0.9.5\n\n"
         "• **TV Passport Timezone Synchronization**: Integrated automatic session-based timezone negotiation with TV Passport, preventing broadcast schedules from reverting to Pacific Time after Daylight Saving Time transitions and ensuring local airtimes (such as Arizona MST) remain accurate year-round.\n"

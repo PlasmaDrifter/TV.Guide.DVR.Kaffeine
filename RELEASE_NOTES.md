@@ -4,6 +4,7 @@
 
 - **External Process Environment Sanitization (SIGBUS Crash Prevention)**: Sanitized the process execution environment in `_get_display_env()` when spawning external system binaries (Kaffeine, SMPlayer, MPV, VLC, xdotool, kdotool). Stripped temporary AppImage FUSE mounts, PyInstaller internal library directories, and bundled Qt6 plugin paths from `LD_LIBRARY_PATH`, `PATH`, and related variables. This prevents external host processes from dynamically linking libraries from `/tmp/.mount_*` and eliminates fatal `SIGBUS` bus errors when the AppImage GUI exits and unmounts.
 - **Preserved Clean Host Environment in AppRun**: Updated the AppImage launcher script to preserve original system `PATH` and `LD_LIBRARY_PATH` variables (`PATH_ORIG`, `LD_LIBRARY_PATH_ORIG`).
+- **Case-Insensitive Channel Uniqueness**: Added case-insensitive deduplication and alignment across channel ordering, Kaffeine channel imports, TV Passport station settings, and guide program caching to prevent duplicate channels with differing casing (e.g. `Suns` vs `SUNS`) from reappearing after deletion.
 
 ## v0.9.5
 

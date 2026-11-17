@@ -95,6 +95,11 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.7": (
+        "## What's Changed in v0.9.7\n\n"
+        "• **Filename Sanitization for Samba and Network Shares**: Replaced colons (`:`) in recording titles with hyphens (` - `) across sports matchups, automated rules, timeshift, and manual scheduling. Automatically sanitizes characters illegal in Windows, NTFS, Samba, and FAT filesystems (`/`, `\\`, `*`, `?`, `\"`, `<`, `>`, `|`, `:`), preventing Samba from mangling recording filenames into random 8.3 hash names over network shares.\n"
+        "• **TV Passport Timezone Boot Handshake & Retry Logic**: Fixed a race condition where the background watcher started before network DNS resolution completed at system boot. Added cookie jar validation and retry with backoff to ensure sessions are only cached when valid `cisession` cookies are established, and reset sessions on each sync cycle to ensure long-running daemons remain synchronized with local timezones."
+    ),
     "0.9.6": (
         "## What's Changed in v0.9.6\n\n"
         "• **External Process Environment Sanitization (SIGBUS Crash Prevention)**: Sanitized the process execution environment in `_get_display_env()` when spawning external system binaries (Kaffeine, SMPlayer, MPV, VLC, xdotool, kdotool). Stripped temporary AppImage FUSE mounts, PyInstaller internal library directories, and bundled Qt6 plugin paths from `LD_LIBRARY_PATH`, `PATH`, and related variables, preventing fatal `SIGBUS` errors when the AppImage GUI exits and unmounts.\n"

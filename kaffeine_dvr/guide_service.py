@@ -244,29 +244,45 @@ class TVPassportProvider:
                 effective_tz = get_system_timezone()
 
         if cls._opener is not None and cls._active_timezone == effective_tz:
-            return cls._opener
+            # Check that cookie jar contains an active session cookie
+            if cls._cookie_jar and any(c.name == "cisession" for c in cls._cookie_jar):
+                return cls._opener
 
-        cls._cookie_jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cls._cookie_jar))
+        cookie_jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
 
-        # Synchronize timezone with TV Passport server session
-        try:
-            post_data = urllib.parse.urlencode({"timezone": effective_tz}).encode("utf-8")
-            tz_req = urllib.request.Request(
-                "https://www.tvpassport.com/my-passport/dashboard/save_timezone",
-                data=post_data,
-                headers={
-                    "User-Agent": cls.USER_AGENT,
-                    "Content-Type": "application/x-www-form-urlencoded"
-                }
-            )
-            with opener.open(tz_req, timeout=10) as resp:
-                pass
-        except Exception as e:
-            print(f"Warning: Failed to set TV Passport timezone to {effective_tz}: {e}")
+        # Synchronize timezone with TV Passport server session with retry
+        success = False
+        last_error = None
+        for attempt in range(3):
+            try:
+                post_data = urllib.parse.urlencode({"timezone": effective_tz}).encode("utf-8")
+                tz_req = urllib.request.Request(
+                    "https://www.tvpassport.com/my-passport/dashboard/save_timezone",
+                    data=post_data,
+                    headers={
+                        "User-Agent": cls.USER_AGENT,
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    }
+                )
+                with opener.open(tz_req, timeout=10) as resp:
+                    if resp.status == 200:
+                        success = True
+                        break
+            except Exception as e:
+                last_error = e
+                time.sleep(1)
 
-        cls._opener = opener
-        cls._active_timezone = effective_tz
+        if success:
+            cls._cookie_jar = cookie_jar
+            cls._opener = opener
+            cls._active_timezone = effective_tz
+            return opener
+
+        if last_error:
+            print(f"Warning: Failed to set TV Passport timezone to {effective_tz}: {last_error}")
+
+        # Return uncached opener so subsequent requests will retry establishing session
         return opener
 
     @classmethod
@@ -875,6 +891,8 @@ class GuideService:
         all_programs = []
         error_msg = None
         provider = self.config_mgr.guide_provider or "hybrid"
+        if provider in ("tvpassport", "hybrid"):
+            TVPassportProvider.reset_session()
 
         if progress_callback:
             progress_callback(f"Starting guide sync using provider: {provider.upper()}...")

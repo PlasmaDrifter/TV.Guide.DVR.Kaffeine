@@ -92,3 +92,46 @@ def test_get_live_program_for_channel(isolated_guide_svc: GuideService):
 
     # Non-existent channel returns None
     assert gs.get_live_program_for_channel("99.9 NONEXISTENT") is None
+
+
+def test_tvpassport_get_opener_retry_and_caching(monkeypatch):
+    from unittest.mock import MagicMock
+    import urllib.error
+    from kaffeine_dvr.guide_service import TVPassportProvider
+
+    TVPassportProvider.reset_session()
+    assert TVPassportProvider._opener is None
+    assert TVPassportProvider._active_timezone is None
+
+    # Simulate network failure during timezone POST
+    def mock_open_failure(req, *args, **kwargs):
+        raise urllib.error.URLError("Temporary failure in name resolution")
+
+    mock_opener = MagicMock()
+    mock_opener.open.side_effect = mock_open_failure
+    monkeypatch.setattr("urllib.request.build_opener", lambda *args: mock_opener)
+
+    opener = TVPassportProvider.get_opener("America/Phoenix")
+    assert opener is not None
+    # Failed attempts should NOT cache opener or active_timezone
+    assert TVPassportProvider._opener is None
+    assert TVPassportProvider._active_timezone is None
+
+    # Now simulate success
+    TVPassportProvider.reset_session()
+    mock_success_opener = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = None
+    mock_success_opener.open.return_value = mock_resp
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *args: mock_success_opener)
+    opener_ok = TVPassportProvider.get_opener("America/Phoenix")
+    assert opener_ok is mock_success_opener
+    assert TVPassportProvider._opener is mock_success_opener
+    assert TVPassportProvider._active_timezone == "America/Phoenix"
+
+    # Clean up
+    TVPassportProvider.reset_session()
+

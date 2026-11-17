@@ -212,10 +212,8 @@ class RulesEngine:
             prog_dur = get_program_duration_mins(prog)
 
             is_sports = is_sports_program(prog)
-            if is_sports and episode_title:
-                rec_title = f"{show_title}: {episode_title}" if show_title else episode_title
-            elif episode_title:
-                rec_title = f"{show_title} - {episode_title}"
+            if episode_title:
+                rec_title = f"{show_title} - {episode_title}" if show_title else episode_title
             else:
                 rec_title = show_title
 

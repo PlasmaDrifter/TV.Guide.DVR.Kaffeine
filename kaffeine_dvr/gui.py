@@ -15826,8 +15826,6 @@ class MainWindow(QMainWindow):
         ep = prog.get("episode_title", "")
         if cat == "movies":
             rec_title = show
-        elif cat == "sports" and ep:
-            rec_title = f"{show}: {ep}" if show else ep
         else:
             rec_title = f"{show} - {ep}" if ep else show
 
@@ -16618,8 +16616,6 @@ class MainWindow(QMainWindow):
         cat = prog.get("_category") or classify_guide_category(prog)
         if cat == "movies":
             rec_title = show
-        elif cat == "sports" and ep:
-            rec_title = f"{show}: {ep}" if show else ep
         else:
             rec_title = f"{show} - {ep}" if ep else show
 

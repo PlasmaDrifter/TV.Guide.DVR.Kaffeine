@@ -1073,6 +1073,9 @@ class KaffeineDbusClient:
         repeat: 0 for once, bitmask for recurring days
         Returns the recording ID.
         """
+        from .queue_manager import sanitize_recording_title
+        name = sanitize_recording_title(name)
+
         if not self.is_running():
             import time
             for _ in range(16):

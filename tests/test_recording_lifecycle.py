@@ -927,5 +927,35 @@ def test_recording_schedule_sortable_columns(qtbot, isolated_config: ConfigManag
     assert win2.rules_table.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
 
 
+def test_sanitize_recording_title():
+    from kaffeine_dvr.queue_manager import sanitize_recording_title
+
+    assert sanitize_recording_title("NBA Basketball: Phoenix Suns at Denver Nuggets") == "NBA Basketball - Phoenix Suns at Denver Nuggets"
+    assert sanitize_recording_title("NFL Football: Los Angeles Rams at Arizona Cardinals") == "NFL Football - Los Angeles Rams at Arizona Cardinals"
+    assert sanitize_recording_title('Movie: "The Matrix" (1999)') == "Movie - 'The Matrix' (1999)"
+    assert sanitize_recording_title("CSI: Crime Scene Investigation: Season 5") == "CSI - Crime Scene Investigation - Season 5"
+    assert sanitize_recording_title("What If...?") == "What If..."
+    assert sanitize_recording_title("AC/DC: Live") == "AC - DC - Live"
+    assert sanitize_recording_title("Test <Show> *Special* | Extra") == "Test Show Special Extra"
+    assert sanitize_recording_title("") == "Recording"
+    assert sanitize_recording_title(None) == "Recording"
+
+
+def test_add_recording_sanitizes_title(isolated_queue_mgr: QueueManager):
+    qm = isolated_queue_mgr
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    qid = qm.add_recording(
+        title="NBA Basketball: Houston Rockets at Phoenix Suns",
+        channel="Suns",
+        start_iso=now_iso,
+        duration_iso="02:30:00"
+    )
+    rec = next(r for r in qm.list_queue() if r["id"] == qid)
+    assert rec["title"] == "NBA Basketball - Houston Rockets at Phoenix Suns"
+    assert ":" not in rec["title"]
+
+
+
 
 

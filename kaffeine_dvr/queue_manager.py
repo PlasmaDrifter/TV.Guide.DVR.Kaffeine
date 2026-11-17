@@ -5,10 +5,30 @@ Manages scheduled, armed, recording, completed, and cancelled recordings in SQLi
 Handles seamless back-to-back channel handovers and end buffer adjustments.
 """
 
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+
+def sanitize_recording_title(title: str) -> str:
+    """
+    Sanitizes show titles for cross-platform filesystem, NTFS, and Samba compatibility:
+    - Replaces colons (':') with ' - ' to prevent Samba 8.3 name mangling.
+    - Strips or replaces characters illegal in Windows/Samba/Linux filenames (/ \\ * ? " < > |).
+    - Normalizes multiple spaces and trims.
+    """
+    if not title:
+        return "Recording"
+    s = str(title).strip()
+    s = re.sub(r'\s*:\s*', ' - ', s)
+    s = re.sub(r'[/\\]+', ' - ', s)
+    s = s.replace('"', "'")
+    s = re.sub(r'[*?<>|]+', '', s)
+    s = re.sub(r'\s*-\s*-\s*', ' - ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s or "Recording"
 
 
 class ActiveScheduledMap(dict):
@@ -219,6 +239,7 @@ class QueueManager:
     ) -> int:
         """Adds a scheduled broadcast or timeshift recording to the queue database."""
         orig_start = original_start_iso or start_iso
+        clean_title = sanitize_recording_title(title)
         # Calculate end_iso and buffered duration
         try:
             dt_start = datetime.fromisoformat(start_iso)
@@ -270,7 +291,7 @@ class QueueManager:
                         original_start_iso = COALESCE(original_start_iso, ?),
                         protected = CASE WHEN ? = 1 THEN 1 ELSE protected END
                     WHERE id = ?
-                """, (title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val, existing_id))
+                """, (clean_title, effective_duration_iso, start_display, end_iso, lead_time_mins, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val, existing_id))
                 conn.commit()
             elif is_already_started:
                 cur.execute("UPDATE recording_queue SET notified = 1 WHERE id = ?", (existing_id,))
@@ -285,7 +306,7 @@ class QueueManager:
                 title, channel, start_iso, duration_iso, start_time_local,
                 end_iso, lead_time_mins, status, created_at, buffer_mins, notified, is_timeshift, original_start_iso, protected
             ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)
-        """, (title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val))
+        """, (clean_title, channel, start_iso, effective_duration_iso, start_display, end_iso, lead_time_mins, now_str, buffer_mins, initial_notified, is_timeshift_val, orig_start, prot_val))
         new_id = cur.lastrowid
         conn.commit()
         conn.close()

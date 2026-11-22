@@ -7086,7 +7086,7 @@ class MainWindow(QMainWindow):
 
         self.refresh_matched_shows_btn = QPushButton("Refresh Matches")
         self.refresh_matched_shows_btn.setToolTip("Re-query guide for shows matching the selected rule")
-        self.refresh_matched_shows_btn.clicked.connect(self._on_rule_selection_changed)
+        self.refresh_matched_shows_btn.clicked.connect(self.refresh_rules)
         hdr_bar.addWidget(self.refresh_matched_shows_btn)
 
         matched_layout.addLayout(hdr_bar)
@@ -8558,7 +8558,7 @@ class MainWindow(QMainWindow):
         self.zero_byte_timeout_spin.setRange(3, 60)
         self.zero_byte_timeout_spin.setSuffix(" sec")
         self.zero_byte_timeout_spin.setFixedWidth(160)
-        self.zero_byte_timeout_spin.setValue(getattr(self.config_mgr, "zero_byte_recording_timeout_secs", 8))
+        self.zero_byte_timeout_spin.setValue(getattr(self.config_mgr, "zero_byte_recording_timeout_secs", 10))
 
         dvr_layout.addRow(
             make_setting_label(
@@ -12285,11 +12285,18 @@ class MainWindow(QMainWindow):
                 subtabs is not None and not sip.isdeleted(subtabs) and subtabs.currentIndex() == 1
             )
 
+            is_rules_visible = is_on_recordings_tab and (
+                subtabs is not None and not sip.isdeleted(subtabs) and subtabs.currentIndex() == 2
+            )
+
             if transitions or queue_changed or is_active_schedule_visible:
                 self.refresh_recordings(force=True)
 
             if transitions or is_history_visible:
                 self.refresh_history()
+
+            if transitions or (is_rules_visible and queue_changed):
+                self.refresh_rules()
 
             if transitions or queue_changed:
                 if hasattr(self, "guide_grid_table") and not sip.isdeleted(self.guide_grid_table) and self.guide_grid_table.rowCount() > 0:
@@ -13421,6 +13428,8 @@ class MainWindow(QMainWindow):
             self.refresh_history(force=True)
             self.history_table.clearSelection()
             self.history_table.setCurrentCell(-1, -1)
+        elif index == 2:
+            self.refresh_rules()
         self._adjust_table_columns()
 
     def _on_main_tab_changed(self, index: int):
@@ -13453,10 +13462,13 @@ class MainWindow(QMainWindow):
                     self._guide_jump_timer.timeout.connect(lambda: self.jump_guide_to_noon(animate=False))
                 self._guide_jump_timer.start(60)
         elif index == 1:
-            if getattr(self, "recordings_subtabs", None) and self.recordings_subtabs.currentIndex() == 1:
+            sub = getattr(self, "recordings_subtabs", None)
+            if sub and sub.currentIndex() == 1:
                 self.refresh_history(force=True)
                 self.history_table.clearSelection()
                 self.history_table.setCurrentCell(-1, -1)
+            elif sub and sub.currentIndex() == 2:
+                self.refresh_rules()
             else:
                 self.refresh_recordings(force=True)
                 self.rec_table.clearSelection()
@@ -16885,6 +16897,25 @@ class MainWindow(QMainWindow):
         rule = next((r for r in self.rules_engine.get_rules() if str(r.get("id")) == str(rule_id)), None)
         self._update_matched_shows_view(rule)
 
+    def _sync_rule_row_match_count(self, rule_id: Any, count: int):
+        """Ensures the 'Matches' column in the rules table stays synchronized with matched shows."""
+        if not hasattr(self, "rules_table") or self.rules_table.rowCount() == 0 or rule_id is None:
+            return
+        target_id_str = str(rule_id)
+        for r in range(self.rules_table.rowCount()):
+            it = self.rules_table.item(r, 0)
+            if it and it.text() == target_id_str:
+                match_str = f"{count} upcoming" if count > 0 else "-"
+                match_item = SortableTableWidgetItem(match_str, sort_key=count)
+                match_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if count > 0:
+                    match_item.setForeground(QColor("#4299e1"))
+                    match_item.setFont(QFont("", -1, QFont.Weight.Bold))
+                else:
+                    match_item.setForeground(QColor("#718096"))
+                self.rules_table.setItem(r, 6, match_item)
+                break
+
     def _update_matched_shows_view(self, rule: Optional[Dict[str, Any]]):
         if not hasattr(self, "matched_shows_table"):
             return
@@ -16909,6 +16940,7 @@ class MainWindow(QMainWindow):
 
             matches = self.rules_engine.get_matching_programs_for_rule(rule) if hasattr(self, "rules_engine") else []
             count = len(matches)
+            self._sync_rule_row_match_count(rule.get("id"), count)
             if count == 0:
                 self.matched_shows_count_label.setText("0 upcoming broadcasts found in guide")
                 self.matched_shows_table.setRowCount(1)

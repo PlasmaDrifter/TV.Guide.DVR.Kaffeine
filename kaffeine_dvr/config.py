@@ -757,7 +757,7 @@ class ConfigManager:
                     if "timeshift_buffer_seconds" not in data:
                         data["timeshift_buffer_seconds"] = 2
                     if "zero_byte_recording_timeout_secs" not in data:
-                        data["zero_byte_recording_timeout_secs"] = 5
+                        data["zero_byte_recording_timeout_secs"] = 10
                     if "delete_timeshift_on_exit" not in data:
                         data["delete_timeshift_on_exit"] = True
                     if "tuner_count" not in data:
@@ -862,7 +862,7 @@ class ConfigManager:
             "custom_playback_player_cmd": "mpv --no-border --window-maximized",
             "live_tv_watch_mode": "system",
             "timeshift_buffer_seconds": 2,
-            "zero_byte_recording_timeout_secs": 5,
+            "zero_byte_recording_timeout_secs": 10,
             "delete_timeshift_on_exit": True,
             "tuner_count": 0,
             "grid_visible_rows": 10,
@@ -1321,7 +1321,7 @@ class ConfigManager:
 
     @property
     def zero_byte_recording_timeout_secs(self) -> int:
-        return int(self.data.get("zero_byte_recording_timeout_secs", 8))
+        return int(self.data.get("zero_byte_recording_timeout_secs", 10))
 
     @zero_byte_recording_timeout_secs.setter
     def zero_byte_recording_timeout_secs(self, val: int):

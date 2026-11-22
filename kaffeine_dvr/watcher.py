@@ -246,7 +246,7 @@ class Watcher:
             return
 
         cfg = self.config_mgr
-        timeout_threshold = getattr(cfg, "zero_byte_recording_timeout_secs", 8)
+        timeout_threshold = getattr(cfg, "zero_byte_recording_timeout_secs", 10)
         now = datetime.now()
         active_queue = self.queue_mgr.list_queue(include_completed=False)
         rec_folder = self.storage_mgr.get_recording_folder()

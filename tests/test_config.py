@@ -14,7 +14,7 @@ def test_default_config(isolated_config: ConfigManager):
     assert cfg.watcher_interval_seconds == 210
     assert cfg.notification_lead_time_mins == 1
     assert cfg.timeshift_buffer_seconds == 2
-    assert cfg.zero_byte_recording_timeout_secs == 5
+    assert cfg.zero_byte_recording_timeout_secs == 10
     assert cfg.guide_auto_advance_interval == 2
 
 

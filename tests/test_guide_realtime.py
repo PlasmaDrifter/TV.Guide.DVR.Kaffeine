@@ -323,4 +323,44 @@ def test_guide_list_unhighlight_toggle_and_escape(qtbot, isolated_config):
     assert len(win.guide_table.selectedItems()) == 0
 
 
+def test_find_recording_for_consecutive_programs_does_not_false_match():
+    from kaffeine_dvr.queue_manager import ActiveScheduledMap
+
+    active_map = ActiveScheduledMap()
+    rec_cardinals = {
+        "id": 140,
+        "title": "NFL Football - Arizona Cardinals at Kansas City Chiefs",
+        "channel": "CBS",
+        "start_iso": "2026-11-22T11:00:00",
+        "duration_iso": "04:00:00",
+        "end_iso": "2026-11-22T15:00:00",
+        "status": "RECORDING"
+    }
+    active_map.add_recording(rec_cardinals)
+    active_map[("cbs", "2026-11-22T11:00")] = rec_cardinals
+
+    prog_cardinals = {
+        "kaffeine_channel": "CBS",
+        "show_title": "NFL Football",
+        "episode_title": "Arizona Cardinals at Kansas City Chiefs",
+        "start_iso": "2026-11-22T11:00:00",
+        "duration_iso": "03:25:00",
+    }
+    prog_jaguars = {
+        "kaffeine_channel": "CBS",
+        "show_title": "NFL Football",
+        "episode_title": "Jacksonville Jaguars at New York Giants",
+        "start_iso": "2026-11-22T14:25:00",
+        "duration_iso": "03:05:00",
+    }
+
+    # First game must match
+    assert active_map.find_recording_for_program(prog_cardinals) is not None
+    assert active_map.find_recording_for_program(prog_cardinals)["id"] == 140
+
+    # Subsequent game must NOT match even though end buffer extends past 14:25
+    assert active_map.find_recording_for_program(prog_jaguars) is None
+
+
+
 

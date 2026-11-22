@@ -89,7 +89,9 @@ class ActiveScheduledMap(dict):
         except Exception:
             return None
 
-        prog_title = (prog.get("show_title") or prog.get("title") or "").strip().lower()
+        prog_show = (prog.get("show_title") or prog.get("title") or "").strip().lower()
+        prog_ep = (prog.get("episode_title") or "").strip().lower()
+        clean_ep = re.sub(r'[^a-zA-Z0-9]', '', prog_ep)
 
         for r in self._recordings:
             r_ch = (r.get("channel") or "").strip().lower()
@@ -105,18 +107,32 @@ class ActiveScheduledMap(dict):
             except Exception:
                 continue
 
-            # Check if active recording start falls within the program's scheduled broadcast window
-            if (start_dt <= r_start < end_dt) or (r_start <= start_dt < r_end):
-                r_title = (r.get("title") or "").strip().lower()
-                if prog_title and r_title:
-                    if prog_title in r_title or r_title in prog_title:
-                        if iso_key:
-                            self[(ch_key, iso_key)] = r
-                        return r
-                else:
-                    if iso_key:
-                        self[(ch_key, iso_key)] = r
-                    return r
+            # Only match if:
+            # 1. Recording started during this broadcast window (delayed start or user triggered mid-broadcast)
+            # 2. Recording started slightly early (pre-roll padding / clock skew within 5 minutes of start_dt)
+            is_valid_timing = (
+                (start_dt <= r_start < end_dt) or
+                (r_start <= start_dt and (start_dt - r_start).total_seconds() <= 300)
+            )
+            if not is_valid_timing:
+                continue
+
+            r_title = (r.get("title") or "").strip().lower()
+            clean_rt = re.sub(r'[^a-zA-Z0-9]', '', r_title)
+
+            # Prevent consecutive episodes/shows of the same franchise (e.g. NFL games, News) from
+            # falsely matching an earlier recording's end buffer when episode titles differ.
+            if clean_ep and clean_ep not in clean_rt:
+                continue
+
+            if prog_show and (prog_show in r_title or r_title in prog_show):
+                if iso_key:
+                    self[(ch_key, iso_key)] = r
+                return r
+            elif not prog_show and not prog_ep:
+                if iso_key:
+                    self[(ch_key, iso_key)] = r
+                return r
 
         return None
 

@@ -95,6 +95,12 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.8": (
+        "## What's Changed in v0.9.8\n\n"
+        "- **Web Companion Security Hardening**: Tightened recording-folder containment checks on completed and active streams, restricted `/api/timeshift/stop` to verified timeshift sessions, failed closed on non-loopback binds without a password, added `HttpOnly` `SameSite=Strict` cookie sessions, CSRF `Origin` checks, security headers, 1 MB POST body limits, and safe RFC 7233 `Range` parsing.\n"
+        "- **Stronger Credentials & Safe Ingestion**: Upgraded web passwords to `scrypt`, enforced `0600` config permissions, split custom player commands before `{file}` substitution, rejected XMLTV `DOCTYPE`/`ENTITY` declarations, and switched synthetic guide IDs to deterministic SHA-256 hashes.\n"
+        "- **Guide Matching, Watcher & Queue Fixes**: Prevented consecutive programs with the same series title from falsely matching an earlier recording's end buffer, fixed `Watcher` config instance reuse, fixed DVB file descriptor leaks, avoided marking past `QUEUED` entries `COMPLETED` on cancel, synchronized `TVPassportProvider` sessions, and updated the default zero-byte watchdog timeout to 10s."
+    ),
     "0.9.7": (
         "## What's Changed in v0.9.7\n\n"
         "• **Filename Sanitization for Samba and Network Shares**: Replaced colons (`:`) in recording titles with hyphens (` - `) across sports matchups, automated rules, timeshift, and manual scheduling. Automatically sanitizes characters illegal in Windows, NTFS, Samba, and FAT filesystems (`/`, `\\`, `*`, `?`, `\"`, `<`, `>`, `|`, `:`), preventing Samba from mangling recording filenames into random 8.3 hash names over network shares.\n"

@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.9.8
+
+- **Web Companion Security Hardening**: Tightened file containment checks across both completed and active stream endpoints using `Path.is_relative_to()`, restricted `/api/timeshift/stop` to verified timeshift sessions, enforced fail-closed authentication when bound to non-loopback addresses without a password, added `HttpOnly` `SameSite=Strict` cookie sessions with `POST /api/logout`, added CSRF `Origin` validation and HTTP security headers, capped `POST` body sizes, properly handled malformed and suffix `Range` headers, and removed `?token=` URL parameters from browser media/download links.
+- **Stronger Password Hashing & File Permissions**: Upgraded web password hashing to salted `scrypt` (preserving legacy SHA-256 verification) and restricted `config.json` file permissions to owner-only (`0600`).
+- **Safe Command & XMLTV Ingestion**: Parsed custom media player command templates before substituting `{file}` to handle filenames with spaces or apostrophes safely, capped XMLTV feed downloads at 50 MB, rejected `DOCTYPE`/`ENTITY` declarations in XMLTV inputs, and replaced process-randomized `hash()` program IDs with deterministic SHA-256 identifiers.
+- **Guide Matching, Watcher, & Hardware Stability Fixes**: Prevented consecutive broadcasts sharing a series name (such as back-to-back sports games) from falsely inheriting an earlier recording's post-game buffer, avoided marking never-armed past `QUEUED` entries as `COMPLETED` on cancellation, fixed `Watcher` config reloading and DVB frontend file descriptor leaks, synchronized `TVPassportProvider` session access, and updated the default zero-byte watchdog timeout to 10 seconds alongside Rules drawer match synchronization.
+
 ## v0.9.7
 
 - **Filename Sanitization for Samba and Network Shares**: Replaced colons (`:`) in recording titles with hyphens (` - `) across sports matchups, automated rules, timeshift, and manual scheduling. Automatically sanitizes characters illegal in Windows, NTFS, Samba, and FAT filesystems (`/`, `\`, `*`, `?`, `"`, `<`, `>`, `|`, `:`), preventing Samba from mangling recording filenames into random 8.3 hash names over network shares.

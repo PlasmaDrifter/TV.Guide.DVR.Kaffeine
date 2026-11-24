@@ -44,7 +44,6 @@ from PyQt6.QtGui import (
     QKeyEvent,
     QKeySequence,
     QPainter,
-    QPainterPath,
     QPalette,
     QPen,
     QPixmap,
@@ -88,9 +87,9 @@ from PyQt6.QtWidgets import (
     QSizeGrip,
     QSizePolicy,
     QSlider,
-    QSplitter,
     QSpacerItem,
     QSpinBox,
+    QSplitter,
     QStackedWidget,
     QStatusBar,
     QStyle,
@@ -15275,7 +15274,7 @@ class MainWindow(QMainWindow):
                 continue
             try:
                 r_start = datetime.fromisoformat(r_start_iso)
-                r_end = datetime.fromisoformat(r_end_iso)
+                datetime.fromisoformat(r_end_iso)
             except Exception:
                 continue
 
@@ -17617,7 +17616,7 @@ def ensure_systemd_service(force: bool = False) -> bool:
 
 
 def main():
-    cli_flags = ["--watch", "--sync", "--rules", "--list", "--status", "--help", "-h"]
+    cli_flags = ["--watch", "--sync", "--rules", "--list", "--status", "--web", "--port", "--help", "-h"]
     if any(arg in sys.argv for arg in cli_flags):
         try:
             from .cli import main as cli_main

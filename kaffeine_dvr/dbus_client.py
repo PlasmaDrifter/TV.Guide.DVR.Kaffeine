@@ -908,10 +908,17 @@ class KaffeineDbusClient:
         cmd = []
         if player_mode == "custom" and custom_cmd and custom_cmd.strip():
             cmd_str = custom_cmd.strip()
-            if "{file}" in cmd_str:
-                cmd = shlex.split(cmd_str.replace("{file}", str(file_path)))
-            else:
-                cmd = shlex.split(cmd_str) + [str(file_path)]
+            try:
+                # Split template before substituting file_path so spaces/quotes in filenames cannot inject flags.
+                parsed_cmd = shlex.split(cmd_str)
+            except ValueError as e:
+                print(f"Invalid custom player command template ({cmd_str}): {e}")
+                parsed_cmd = []
+            if parsed_cmd:
+                if any("{file}" in part for part in parsed_cmd):
+                    cmd = [part.replace("{file}", str(file_path)) for part in parsed_cmd]
+                else:
+                    cmd = parsed_cmd + [str(file_path)]
         elif player_mode in SUPPORTED_PLAYERS and player_mode != "system":
             info = SUPPORTED_PLAYERS[player_mode]
             bin_name = info.get("binary")
@@ -1092,7 +1099,7 @@ class KaffeineDbusClient:
                 for entry in existing_entries:
                     e_ch = (entry.get("channel") or "").strip().lower()
                     e_name = (entry.get("name") or "").strip().lower()
-                    if e_ch == ch_target and (e_name == name_target or name_target in e_name):
+                    if e_ch == ch_target and e_name and name_target and (e_name == name_target or name_target in e_name):
                         if entry.get("is_running"):
                             print(
                                 f"Active recording already running in Kaffeine for '{name}' on {channel} "
@@ -1289,11 +1296,11 @@ class KaffeineDbusClient:
 
                     match_show = False
                     if ch_targets and t_target:
-                        match_show = (e_ch in ch_targets) and ((e_name == t_target) or (t_target in e_name) or (e_name in t_target))
+                        match_show = (e_ch in ch_targets) and bool(e_name) and ((e_name == t_target) or (t_target in e_name) or (e_name in t_target))
                     elif ch_targets:
                         match_show = (e_ch in ch_targets)
                     elif t_target:
-                        match_show = (e_name == t_target) or (t_target in e_name) or (e_name in t_target)
+                        match_show = bool(e_name) and ((e_name == t_target) or (t_target in e_name) or (e_name in t_target))
                     elif key is not None and int(key) == int(e_id):
                         match_show = True
 

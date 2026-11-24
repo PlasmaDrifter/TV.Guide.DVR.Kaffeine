@@ -7,12 +7,13 @@ stores program metadata in a local WAL-mode SQLite cache, and provides fast sear
 
 import hashlib
 import html
+import http.cookiejar
 import json
 import os
 import re
 import sqlite3
+import threading
 import time
-import http.cookiejar
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +21,21 @@ import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
+MAX_XMLTV_BYTES = 50 * 1024 * 1024  # 50 MB upper bound for XMLTV feeds
+
+
+def _deterministic_program_id(key: str) -> int:
+    """Computes a stable positive 63-bit integer ID across process restarts."""
+    digest = hashlib.sha256(key.encode("utf-8", errors="replace")).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFFFFFFFFFFFFFF
+
+
+def _parse_safe_xml(xml_content: bytes) -> ET.Element:
+    """Parses XML bytes while rejecting DTD/ENTITY declarations to prevent XML entity expansion."""
+    if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", xml_content, re.IGNORECASE):
+        raise ValueError("XMLTV payload contains forbidden DOCTYPE or ENTITY declaration")
+    return ET.fromstring(xml_content)
 
 try:
     from .config import ConfigManager, get_system_timezone
@@ -231,6 +247,7 @@ class TVPassportProvider:
     _opener: Optional[urllib.request.OpenerDirector] = None
     _active_timezone: Optional[str] = None
     _cookie_jar: Optional[http.cookiejar.CookieJar] = None
+    _session_lock = threading.RLock()
 
     @classmethod
     def get_opener(cls, tz: Optional[str] = None) -> urllib.request.OpenerDirector:
@@ -243,60 +260,63 @@ class TVPassportProvider:
             except Exception:
                 effective_tz = get_system_timezone()
 
-        if cls._opener is not None and cls._active_timezone == effective_tz:
-            # Check that cookie jar contains an active session cookie
-            if cls._cookie_jar and any(c.name == "cisession" for c in cls._cookie_jar):
-                return cls._opener
+        with cls._session_lock:
+            if cls._opener is not None and cls._active_timezone == effective_tz:
+                # Check that cookie jar contains an active session cookie
+                if cls._cookie_jar and any(c.name == "cisession" for c in cls._cookie_jar):
+                    return cls._opener
 
-        cookie_jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+            cookie_jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
 
-        # Synchronize timezone with TV Passport server session with retry
-        success = False
-        last_error = None
-        for attempt in range(3):
-            try:
-                post_data = urllib.parse.urlencode({"timezone": effective_tz}).encode("utf-8")
-                tz_req = urllib.request.Request(
-                    "https://www.tvpassport.com/my-passport/dashboard/save_timezone",
-                    data=post_data,
-                    headers={
-                        "User-Agent": cls.USER_AGENT,
-                        "Content-Type": "application/x-www-form-urlencoded"
-                    }
-                )
-                with opener.open(tz_req, timeout=10) as resp:
-                    if resp.status == 200:
-                        success = True
-                        break
-            except Exception as e:
-                last_error = e
-                time.sleep(1)
+            # Synchronize timezone with TV Passport server session with retry
+            success = False
+            last_error = None
+            for attempt in range(3):
+                try:
+                    post_data = urllib.parse.urlencode({"timezone": effective_tz}).encode("utf-8")
+                    tz_req = urllib.request.Request(
+                        "https://www.tvpassport.com/my-passport/dashboard/save_timezone",
+                        data=post_data,
+                        headers={
+                            "User-Agent": cls.USER_AGENT,
+                            "Content-Type": "application/x-www-form-urlencoded"
+                        }
+                    )
+                    with opener.open(tz_req, timeout=10) as resp:
+                        if resp.status == 200:
+                            success = True
+                            break
+                except Exception as e:
+                    last_error = e
+                    time.sleep(1)
 
-        if success:
-            cls._cookie_jar = cookie_jar
-            cls._opener = opener
-            cls._active_timezone = effective_tz
+            if success:
+                cls._cookie_jar = cookie_jar
+                cls._opener = opener
+                cls._active_timezone = effective_tz
+                return opener
+
+            if last_error:
+                print(f"Warning: Failed to set TV Passport timezone to {effective_tz}: {last_error}")
+
+            # Return uncached opener so subsequent requests will retry establishing session
             return opener
-
-        if last_error:
-            print(f"Warning: Failed to set TV Passport timezone to {effective_tz}: {last_error}")
-
-        # Return uncached opener so subsequent requests will retry establishing session
-        return opener
 
     @classmethod
     def reset_session(cls):
         """Invalidates the cached TV Passport HTTP session and cookie jar."""
-        cls._opener = None
-        cls._active_timezone = None
-        cls._cookie_jar = None
+        with cls._session_lock:
+            cls._opener = None
+            cls._active_timezone = None
+            cls._cookie_jar = None
 
     @classmethod
     def _get_station_base_url(cls, station_id: str) -> str:
         sid = station_id.strip()
-        if sid in cls._canonical_urls:
-            return cls._canonical_urls[sid]
+        with cls._session_lock:
+            if sid in cls._canonical_urls:
+                return cls._canonical_urls[sid]
 
         url = f"https://www.tvpassport.com/tv-listings/stations/station/{sid}"
         headers = {"User-Agent": cls.USER_AGENT}
@@ -312,13 +332,16 @@ class TVPassportProvider:
             except urllib.error.HTTPError as e:
                 loc = e.headers.get("Location")
                 if loc:
-                    cls._canonical_urls[sid] = loc.rstrip("/")
-                    return cls._canonical_urls[sid]
+                    resolved = loc.rstrip("/")
+                    with cls._session_lock:
+                        cls._canonical_urls[sid] = resolved
+                    return resolved
         except Exception as e:
             print(f"Error resolving canonical URL for station {sid}: {e}")
 
         fallback = f"https://www.tvpassport.com/tv-listings/stations/station/{sid}"
-        cls._canonical_urls[sid] = fallback
+        with cls._session_lock:
+            cls._canonical_urls[sid] = fallback
         return fallback
 
     @classmethod
@@ -408,7 +431,7 @@ class TVPassportProvider:
                 show_name = ep_title
                 ep_title = ""
 
-            listing_id = int(id_m.group(1)) if id_m and id_m.group(1).isdigit() else abs(hash(f"{station_id}_{start_time_raw}_{show_name}")) % 100000000
+            listing_id = int(id_m.group(1)) if id_m and id_m.group(1).isdigit() else _deterministic_program_id(f"tvp_{station_id}_{start_time_raw}_{show_name}")
 
             ep_num_m = re.search(r'data-episodeNumber=\"([^\"]+)\"', it)
             ep_num_raw = ep_num_m.group(1).strip() if ep_num_m else ""
@@ -546,16 +569,22 @@ class XMLTVProvider:
         if parsed_target.scheme in ("http", "https"):
             req = urllib.request.Request(target, headers={"User-Agent": cls.USER_AGENT})
             with urllib.request.urlopen(req, timeout=30) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-                xml_content = resp.read()
+                xml_content = resp.read(MAX_XMLTV_BYTES + 1)
+                if len(xml_content) > MAX_XMLTV_BYTES:
+                    print(f"Error loading XMLTV feed: response exceeded {MAX_XMLTV_BYTES} bytes limit")
+                    return []
         else:
             resolved_path = Path(os.path.expanduser(target))
             if not resolved_path.exists():
                 return []
+            if resolved_path.stat().st_size > MAX_XMLTV_BYTES:
+                print(f"Error loading XMLTV file: size exceeds {MAX_XMLTV_BYTES} bytes limit")
+                return []
             with open(resolved_path, "rb") as f:
-                xml_content = f.read()
+                xml_content = f.read(MAX_XMLTV_BYTES + 1)
 
         try:
-            root = ET.fromstring(xml_content)
+            root = _parse_safe_xml(xml_content)
         except Exception as e:
             print(f"Error parsing XMLTV content: {e}")
             return []
@@ -613,7 +642,7 @@ class XMLTVProvider:
             desc_elem = prog.find("desc")
             desc = desc_elem.text.strip() if (desc_elem is not None and desc_elem.text) else ""
 
-            synthetic_id = abs(hash(f"{ch_name}_{start_iso}_{show_title}")) % 1000000000
+            synthetic_id = _deterministic_program_id(f"xmltv_{ch_name}_{start_iso}_{show_title}")
 
             programs.append({
                 "tvmaze_id": synthetic_id,
@@ -923,8 +952,10 @@ class GuideService:
                 if sd_health["status"] != "Online":
                     error_msg = f"Schedules Direct Auth Error: {sd_health['details']}"
                 else:
+                    error_msg = "Schedules Direct lineup download is not yet implemented; existing cached guide preserved."
                     if progress_callback:
-                        progress_callback("Schedules Direct authenticated. Syncing lineup...")
+                        progress_callback(error_msg)
+            return 0
 
         elif provider == "tvpassport":
             # Pure TV Passport for configured stations

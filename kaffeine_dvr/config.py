@@ -33,8 +33,9 @@ def get_system_timezone() -> str:
     try:
         from datetime import datetime
         tz = datetime.now().astimezone().tzinfo
-        if hasattr(tz, "key") and tz.key:
-            return tz.key
+        tz_key = getattr(tz, "key", None)
+        if isinstance(tz_key, str) and tz_key:
+            return tz_key
     except Exception:
         pass
     return "America/Phoenix"
@@ -916,12 +917,14 @@ class ConfigManager:
     def _save(self, data: Dict[str, Any]):
         try:
             tmp_file = self.config_file.with_name(f"{self.config_file.name}.tmp")
-            with open(tmp_file, "w", encoding="utf-8") as f:
+            fd = os.open(tmp_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, self.config_file)
             try:
+                os.chmod(self.config_file, 0o600)
                 self._last_mtime = self.config_file.stat().st_mtime
             except Exception:
                 pass
@@ -1889,27 +1892,49 @@ class ConfigManager:
         return bool(self.data.get("web_server_password_hash"))
 
     def set_web_password(self, password: str):
-        """Hashes and stores the web access password with a secure cryptographic salt."""
+        """Hashes and stores the web access password with scrypt and a cryptographic salt."""
         import hashlib
         import secrets
         if not password:
             self.data["web_server_password_hash"] = ""
             self.data["web_server_salt"] = ""
         else:
-            salt = secrets.token_hex(16)
-            h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-            self.data["web_server_salt"] = salt
-            self.data["web_server_password_hash"] = h
+            salt_bytes = secrets.token_bytes(16)
+            n, r, p = 16384, 8, 1
+            derived = hashlib.scrypt(
+                password.encode("utf-8"),
+                salt=salt_bytes,
+                n=n,
+                r=r,
+                p=p,
+                dklen=32,
+            ).hex()
+            self.data["web_server_salt"] = salt_bytes.hex()
+            self.data["web_server_password_hash"] = f"scrypt${n}${r}${p}${derived}"
         self.save()
 
     def verify_web_password(self, password: str) -> bool:
-        """Verifies candidate password against stored salt and hash."""
+        """Verifies candidate password against stored salt and scrypt or legacy SHA-256 hash."""
         stored_hash = self.data.get("web_server_password_hash", "")
-        if not stored_hash:
-            return True
+        if not stored_hash or not isinstance(password, str):
+            return False
         import hashlib
         import hmac
         salt = self.data.get("web_server_salt", "")
+        if stored_hash.startswith("scrypt$"):
+            try:
+                _, n_str, r_str, p_str, expected_hex = stored_hash.split("$", 4)
+                derived = hashlib.scrypt(
+                    password.encode("utf-8"),
+                    salt=bytes.fromhex(salt),
+                    n=int(n_str),
+                    r=int(r_str),
+                    p=int(p_str),
+                    dklen=len(bytes.fromhex(expected_hex)),
+                ).hex()
+                return hmac.compare_digest(expected_hex, derived)
+            except Exception:
+                return False
         cand_hash = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
         return hmac.compare_digest(stored_hash, cand_hash)
 

@@ -10,6 +10,7 @@ Tests for Kaffeine DVR Remote Web Companion:
 import json
 import time
 import urllib.request
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -138,11 +139,12 @@ def test_web_schedule_and_recordings_api(web_test_env):
     base_url = web_test_env["base_url"]
     q_mgr = web_test_env["q_mgr"]
 
-    # Schedule a new show via POST /api/schedule
+    # Schedule a new show via POST /api/schedule (use future date so cancellation stays 'cancelled')
+    future_day = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     payload = json.dumps({
         "title": "Evening News Broadcast",
         "channel": "KSTP-DT",
-        "start_iso": "2026-10-15T18:00:00",
+        "start_iso": f"{future_day}T18:00:00",
         "duration_iso": "00:30:00"
     }).encode("utf-8")
 
@@ -181,11 +183,11 @@ def test_web_schedule_and_recordings_api(web_test_env):
     g_cur.execute("""
         INSERT INTO guide_programs (show_title, episode_title, kaffeine_channel, start_time_local, start_iso, duration_iso, runtime_mins, summary, airdate)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, ("Morning Show", "Pilot", "KSTP-DT", "8:00 AM", "2026-10-15T08:00:00", "01:00:00", 60, "Fun morning news", "2026-10-15"))
+    """, ("Morning Show", "Pilot", "KSTP-DT", "8:00 AM", f"{future_day}T08:00:00", "01:00:00", 60, "Fun morning news", future_day))
     g_conn.commit()
     g_conn.close()
 
-    with urllib.request.urlopen(f"{base_url}/api/guide?date=2026-10-15&trim=0") as resp:
+    with urllib.request.urlopen(f"{base_url}/api/guide?date={future_day}&trim=0") as resp:
         assert resp.status == 200
         progs = json.loads(resp.read().decode("utf-8"))
         assert len(progs) >= 1
@@ -330,15 +332,15 @@ def test_web_cancel_active_recording_and_dbus_cancel(web_test_env):
         assert active[0]["status"] == "RECORDING"
         assert active[0]["stream_url"] == f"/api/stream/active/{qid}"
 
-    # Cancel recording via DELETE /api/schedule/<id>
+    # Cancel active RECORDING via DELETE /api/schedule/<id> (retained as completed)
     del_req = urllib.request.Request(f"{base_url}/api/schedule/{qid}", method="DELETE")
     with urllib.request.urlopen(del_req) as resp:
         assert resp.status == 200
         del_data = json.loads(resp.read().decode("utf-8"))
-        assert del_data.get("status") == "cancelled"
+        assert del_data.get("status") == "completed"
 
-    # Queue should be empty and mock_dbus should have recorded the cancel call
-    assert len(q_mgr.list_queue()) == 0
+    # Active schedule retains COMPLETED record for 6h; active RECORDING list has no running items
+    assert all(r["status"] != "RECORDING" for r in q_mgr.list_queue())
     assert len(mock_dbus.cancelled) >= 1
     assert mock_dbus.cancelled[0][1] == "Defy"
     assert mock_dbus.cancelled[0][2] == "Live PD Action"
@@ -429,5 +431,131 @@ def test_web_on_queue_changed_notification(web_test_env):
         assert resp.status == 200
 
     assert call_count == 2
+
+
+def test_security_sibling_prefix_and_timeshift_stop_isolation(web_test_env):
+    base_url = web_test_env["base_url"]
+    rec_folder = web_test_env["rec_folder"]
+    q_mgr = web_test_env["q_mgr"]
+
+    # 1. Sibling directory sharing rec_folder prefix (e.g. recordings_evil vs recordings) must be rejected (403)
+    sibling_dir = rec_folder.parent / (rec_folder.name + "_evil")
+    sibling_dir.mkdir(parents=True, exist_ok=True)
+    evil_file = sibling_dir / "secret.m2t"
+    evil_file.write_bytes(b"secret_payload" * 100)
+
+    conn = q_mgr._get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, ("Prefix Bypass", "TEST", "2026-10-15T01:00:00", "01:00:00", "1:00 AM", "2026-10-15 02:00:00", str(evil_file)))
+    evil_hid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(f"{base_url}/api/stream/{evil_hid}")
+    assert exc_info.value.code == 403
+
+    # 2. /api/stream/active/<qid> must also block files outside rec_folder
+    qid_ext = q_mgr.add_recording(
+        title="External Active File",
+        channel="NBC",
+        start_iso="2099-01-01T12:00:00",
+        duration_iso="01:00:00",
+    )
+    q_mgr.set_recording_file(qid_ext, str(evil_file))
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(f"{base_url}/api/stream/active/{qid_ext}")
+    assert exc_info.value.code == 403
+
+    # 3. POST /api/timeshift/stop must reject non-timeshift scheduled recordings without deleting their files
+    legit_file = rec_folder / "Legit Scheduled.m2t"
+    legit_file.write_bytes(b"keep_me" * 100)
+    qid_sched = q_mgr.add_recording(
+        title="Legit Scheduled",
+        channel="CBS",
+        start_iso="2099-01-01T14:00:00",
+        duration_iso="01:00:00",
+        is_timeshift=False,
+    )
+    q_mgr.set_recording_file(qid_sched, str(legit_file))
+
+    stop_req = urllib.request.Request(
+        f"{base_url}/api/timeshift/stop",
+        data=json.dumps({"queue_id": qid_sched}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(stop_req)
+    assert exc_info.value.code == 403
+    assert legit_file.exists()
+
+
+def test_security_non_loopback_without_password_fails_closed(web_test_env):
+    base_url = web_test_env["base_url"]
+    server = web_test_env["server"]
+    # Simulate non-loopback bind with no password configured
+    orig_bind = server.bind_addr
+    server.bind_addr = "0.0.0.0"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"{base_url}/api/status")
+        assert exc_info.value.code == 401
+    finally:
+        server.bind_addr = orig_bind
+
+
+def test_security_suffix_range_and_custom_player_and_xmltv(tmp_path, web_test_env, isolated_queue_mgr):
+    base_url = web_test_env["base_url"]
+    rec_folder = web_test_env["rec_folder"]
+    q_mgr = web_test_env["q_mgr"]
+
+    # Suffix range request bytes=-4 on mp4
+    mp4 = rec_folder / "test_clip.mp4"
+    mp4.write_bytes(b"ABCDEFGHIJ")
+    conn = q_mgr._get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO recording_history (title, channel, start_iso, duration_iso, start_time_local, completed_at, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, ("Clip", "CBS", "2026-10-15T05:00:00", "00:10:00", "5:00 AM", "2026-10-15 05:10:00", str(mp4)))
+    hid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    req = urllib.request.Request(f"{base_url}/api/stream/{hid}", headers={"Range": "bytes=-4"})
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 206
+        assert resp.headers.get("Content-Range") == "bytes 6-9/10"
+        assert resp.read() == b"GHIJ"
+
+    # Custom player command with spaces and apostrophe in filename
+    from unittest.mock import patch
+    from kaffeine_dvr.dbus_client import KaffeineDbusClient
+    tricky_file = tmp_path / "Bob's Burgers - Episode 1.m2t"
+    tricky_file.write_bytes(b"123")
+    client = KaffeineDbusClient()
+    with patch("subprocess.Popen") as mock_popen:
+        client.play_file(str(tricky_file), player="custom", custom_cmd='mpv --no-border "{file}"')
+        called_cmd = mock_popen.call_args[0][0]
+        assert called_cmd == ["mpv", "--no-border", str(tricky_file)]
+
+    # XMLTV entity/DOCTYPE rejection
+    from kaffeine_dvr.guide_service import _parse_safe_xml
+    with pytest.raises(ValueError):
+        _parse_safe_xml(b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">]><tv/>')
+
+    # Past QUEUED cancellation does not mark COMPLETED
+    qid_past_queued = isolated_queue_mgr.add_recording(
+        title="Never Armed Past Show",
+        channel="ABC",
+        start_iso="2020-01-01T12:00:00",
+        duration_iso="01:00:00",
+    )
+    res = isolated_queue_mgr.cancel_recording(qid_past_queued)
+    assert res is not None and res["stopped_in_progress"] is False
+
 
 

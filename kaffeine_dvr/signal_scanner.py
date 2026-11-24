@@ -71,23 +71,29 @@ class DvbSignalReader:
         # 2. Check frontends for active lock or carrier
         dvb_root = Path("/dev/dvb")
         if dvb_root.is_dir():
-            frontends = []
+            frontends: List[str] = []
             for adapter in sorted(dvb_root.glob("adapter*")):
-                for fe in sorted(adapter.glob("frontend*")):
-                    if fe.is_char_device():
-                        frontends.append(str(fe))
+                for fe_path in sorted(adapter.glob("frontend*")):
+                    if fe_path.is_char_device():
+                        frontends.append(str(fe_path))
 
             buf4 = bytearray(4)
-            for fe in frontends:
+            for fe_str in frontends:
+                fd: Optional[int] = None
                 try:
-                    fd = os.open(fe, os.O_RDONLY | os.O_NONBLOCK)
+                    fd = os.open(fe_str, os.O_RDONLY | os.O_NONBLOCK)
                     fcntl.ioctl(fd, FE_READ_STATUS, buf4)
-                    os.close(fd)
                     status = struct.unpack("I", buf4)[0]
                     if status & (FE_HAS_LOCK | FE_HAS_SIGNAL | FE_HAS_CARRIER):
-                        return fe
+                        return fe_str
                 except Exception:
                     pass
+                finally:
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except OSError:
+                            pass
 
             if frontends:
                 return frontends[0]

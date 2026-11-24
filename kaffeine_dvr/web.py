@@ -8,8 +8,10 @@ Provides:
 - Salted SHA-256 session token authentication for Tailscale / LAN access.
 """
 
+import http.cookies
 import http.server
 import json
+import math
 import mimetypes
 import secrets
 import shutil
@@ -18,7 +20,7 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import ConfigManager
 from .guide_service import GuideService
@@ -27,6 +29,15 @@ from .storage_manager import StorageManager
 from .web_ui import WEB_HTML_TEMPLATE
 
 _CACHED_FAVICON_BYTES: Optional[bytes] = None
+MAX_POST_BODY_BYTES = 1024 * 1024  # 1 MB cap for JSON API bodies
+MAX_ACTIVE_TOKENS = 128
+SESSION_COOKIE_NAME = "kaffeine_session"
+
+
+def _is_loopback_addr(addr: str) -> bool:
+    """Returns True if addr is a loopback address or hostname."""
+    val = (addr or "").strip().lower()
+    return val in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
 
 
 def _get_favicon_bytes() -> bytes:
@@ -71,12 +82,28 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         """Silences default HTTP request console logging to keep terminal output clean."""
         pass
 
-    def _send_json(self, data: Any, status: int = 200):
+    def _send_security_headers(self, include_csp: bool = False):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if include_csp:
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                "style-src 'self' 'unsafe-inline'; media-src 'self' blob:; "
+                "img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+            )
+
+    def _send_json(self, data: Any, status: int = 200, extra_headers: Optional[List[Tuple[str, str]]] = None):
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._send_security_headers()
+        if extra_headers:
+            for hk, hv in extra_headers:
+                self.send_header(hk, hv)
         self.end_headers()
         self.wfile.write(body)
 
@@ -86,33 +113,98 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
+        self._send_security_headers(include_csp=True)
         self.end_headers()
         self.wfile.write(body)
 
-    def _is_authenticated(self) -> bool:
-        if not self.server_obj or not self.server_obj.config_mgr.has_web_password:
-            return True
-
+    def _extract_request_token(self) -> str:
         # 1. Bearer Token in Authorization header
         auth_hdr = self.headers.get("Authorization", "")
         if auth_hdr.startswith("Bearer "):
-            token = auth_hdr[7:].strip()
-            if self.server_obj.is_valid_token(token):
-                return True
+            tok = auth_hdr[7:].strip()
+            if tok:
+                return tok
 
-        # 2. Token in Query Parameter (used by <video src="/api/stream/..">)
+        # 2. HttpOnly Session Cookie
+        cookie_hdr = self.headers.get("Cookie", "")
+        if cookie_hdr:
+            try:
+                cookie = http.cookies.SimpleCookie()
+                cookie.load(cookie_hdr)
+                if SESSION_COOKIE_NAME in cookie and cookie[SESSION_COOKIE_NAME].value:
+                    return cookie[SESSION_COOKIE_NAME].value.strip()
+            except Exception:
+                pass
+
+        # 3. Token in Query Parameter (fallback for legacy direct URLs)
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        q_token = qs.get("token", [""])[0]
-        return bool(q_token and self.server_obj.is_valid_token(q_token))
+        return (qs.get("token", [""])[0] or "").strip()
+
+    def _is_authenticated(self) -> bool:
+        if not self.server_obj:
+            return False
+        if not self.server_obj.config_mgr.has_web_password:
+            # Fail closed unless strictly bound to loopback and accessed locally
+            client_ip = self.client_address[0] if self.client_address else ""
+            return _is_loopback_addr(self.server_obj.bind_addr) and _is_loopback_addr(client_ip)
+
+        token = self._extract_request_token()
+        return bool(token and self.server_obj.is_valid_token(token))
+
+    def _is_same_origin(self) -> bool:
+        """Blocks cross-origin browser CSRF requests when an Origin header is supplied."""
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host:
+            return False
+        try:
+            parsed_origin = urllib.parse.urlparse(origin)
+            return parsed_origin.netloc.lower() == host
+        except Exception:
+            return False
+
+    def _is_within_recording_folder(self, target_path: Path) -> bool:
+        """Verifies target_path resolves strictly inside the configured recording folder."""
+        if not self.server_obj:
+            return False
+        try:
+            rec_folder = self.server_obj.storage_mgr.get_recording_folder().resolve()
+            resolved_target = target_path.resolve()
+            return resolved_target.is_relative_to(rec_folder)
+        except Exception:
+            return False
 
     def do_POST(self):
         """Dispatches POST API requests including authentication, recording creation, and tuning."""
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
-        content_len = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else ""
+        if not self._is_same_origin():
+            self._send_json({"error": "Forbidden cross-origin request"}, status=403)
+            return
+
+        raw_len = self.headers.get("Content-Length")
+        try:
+            content_len = int(raw_len) if raw_len is not None else 0
+        except (ValueError, TypeError):
+            self._send_json({"error": "Invalid Content-Length header"}, status=400)
+            return
+
+        if content_len < 0:
+            self._send_json({"error": "Invalid Content-Length header"}, status=400)
+            return
+        if content_len > MAX_POST_BODY_BYTES:
+            self._send_json({"error": "Request body too large"}, status=413)
+            return
+
+        try:
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else ""
+        except UnicodeDecodeError:
+            self._send_json({"error": "Invalid UTF-8 request body"}, status=400)
+            return
 
         # Login endpoint: POST /api/login
         if path == "/api/login":
@@ -133,7 +225,11 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                 if self.server_obj.config_mgr.verify_web_password(pw):
                     self.server_obj.record_successful_login(client_ip)
                     token = self.server_obj.create_session_token()
-                    self._send_json({"token": token, "status": "ok"})
+                    cookie_hdr = f"{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800"
+                    self._send_json(
+                        {"token": token, "status": "ok"},
+                        extra_headers=[("Set-Cookie", cookie_hdr)],
+                    )
                     return
 
                 # Incorrect password: record attempt and apply anti-brute delay (5 attempts max, 15 min lockout)
@@ -155,6 +251,14 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, status=400)
                 return
+
+        if path == "/api/logout":
+            token = self._extract_request_token()
+            if token and self.server_obj:
+                self.server_obj.revoke_session_token(token)
+            clear_cookie = f"{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"
+            self._send_json({"status": "logged_out"}, extra_headers=[("Set-Cookie", clear_cookie)])
+            return
 
         # Enforce authentication for all other mutating endpoints
         if not self._is_authenticated():
@@ -299,6 +403,14 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
                 qid = int(qid)
                 rec = self.server_obj.queue_mgr.get_recording(qid)
+                is_tracked_ts = qid in self.server_obj.active_timeshift_sessions
+                if not rec and not is_tracked_ts:
+                    self._send_json({"error": "Timeshift session not found"}, status=404)
+                    return
+                if rec and not bool(rec.get("is_timeshift")) and not is_tracked_ts:
+                    self._send_json({"error": "Target recording is not a timeshift session"}, status=403)
+                    return
+
                 ts_session = self.server_obj.active_timeshift_sessions.pop(qid, None)
 
                 # Stop recording in Kaffeine and remove from queue
@@ -310,13 +422,13 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                         title=rec.get("title")
                     )
 
-                # Clean up temporary timeshift file if configured
-                if getattr(self.server_obj.config_mgr, "delete_timeshift_on_exit", True):
+                # Clean up temporary timeshift file if configured and safely within recording folder
+                if getattr(self.server_obj.config_mgr, "delete_timeshift_on_exit", True) and not (rec and rec.get("protected")):
                     fpath = (rec.get("file_path") if rec else None) or (ts_session.get("file_path") if ts_session else None)
                     if fpath:
                         try:
-                            p = Path(fpath)
-                            if p.exists():
+                            p = Path(fpath).resolve()
+                            if p.exists() and self._is_within_recording_folder(p):
                                 p.unlink()
                         except Exception:
                             pass
@@ -332,6 +444,9 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         """Dispatches DELETE API requests to cancel scheduled or active recordings."""
+        if not self._is_same_origin():
+            self._send_json({"error": "Forbidden cross-origin request"}, status=403)
+            return
         if not self._is_authenticated():
             self._send_json({"error": "Unauthorized"}, status=401)
             return
@@ -395,12 +510,22 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                 if folder and folder.exists():
                     _, _, free = shutil.disk_usage(str(folder))
                     free_gb = round(free / (1024 ** 3), 1)
+                extra_hdrs = None
+                auth_hdr = self.headers.get("Authorization", "")
+                if (
+                    self.server_obj.config_mgr.has_web_password
+                    and auth_hdr.startswith("Bearer ")
+                    and SESSION_COOKIE_NAME not in self.headers.get("Cookie", "")
+                ):
+                    tok = auth_hdr[7:].strip()
+                    if self.server_obj.is_valid_token(tok):
+                        extra_hdrs = [("Set-Cookie", f"{SESSION_COOKIE_NAME}={tok}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")]
                 self._send_json({
                     "status": "online",
                     "free_disk_gb": free_gb,
                     "active_recordings": active_recs,
                     "server_port": self.server_obj.port
-                })
+                }, extra_headers=extra_hdrs)
                 return
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
@@ -559,12 +684,17 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     self._send_json({"error": "Live stream file not yet created or buffered on disk"}, status=404)
                     return
 
+                resolved_active = active_file.resolve()
+                if not self._is_within_recording_folder(resolved_active):
+                    self._send_json({"error": "Access denied"}, status=403)
+                    return
+
                 # Cache file path in timeshift session if applicable
                 if qid in self.server_obj.active_timeshift_sessions:
-                    self.server_obj.active_timeshift_sessions[qid]["file_path"] = str(active_file)
+                    self.server_obj.active_timeshift_sessions[qid]["file_path"] = str(resolved_active)
 
                 # Stream with live follow mode enabled
-                self._stream_file(active_file.resolve(), parsed.query, is_live=True)
+                self._stream_file(resolved_active, parsed.query, is_live=True)
                 return
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
@@ -595,9 +725,8 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # Security check: Ensure file resides strictly inside recording folder
-                rec_folder = self.server_obj.storage_mgr.get_recording_folder().resolve()
                 resolved_target = found.resolve()
-                if not str(resolved_target).startswith(str(rec_folder)):
+                if not self._is_within_recording_folder(resolved_target):
                     self._send_json({"error": "Access denied"}, status=403)
                     return
 
@@ -625,7 +754,12 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
             self._stream_file_with_range(file_path, is_download=False)
             return
 
-        start_time_sec = float(qs.get("t", ["0"])[0])
+        try:
+            start_time_sec = float(qs.get("t", ["0"])[0])
+            if not math.isfinite(start_time_sec) or start_time_sec < 0:
+                start_time_sec = 0.0
+        except (ValueError, TypeError):
+            start_time_sec = 0.0
 
         stream_filename = file_path.with_suffix(".mp4").name
         quoted_stream_fn = urllib.parse.quote(stream_filename, safe="")
@@ -636,6 +770,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Content-Disposition", cd_header)
         self.send_header("Cache-Control", "no-cache")
+        self._send_security_headers()
         self.end_headers()
 
         import subprocess
@@ -688,22 +823,50 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
 
         start = 0
         end = total_size - 1
+        has_valid_range = False
 
-        if range_header and range_header.startswith("bytes="):
-            parts = range_header[6:].split("-")
-            if parts[0]:
-                start = int(parts[0])
-            if len(parts) > 1 and parts[1]:
-                end = int(parts[1])
+        if range_header:
+            if not range_header.startswith("bytes="):
+                self._send_json({"error": "Invalid Range header"}, status=416)
+                return
+            range_spec = range_header[6:].split(",")[0].strip()
+            parts = range_spec.split("-")
+            if len(parts) != 2:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{total_size}")
+                self.end_headers()
+                return
+            try:
+                if not parts[0] and parts[1]:
+                    # Suffix range: bytes=-N
+                    suffix_len = int(parts[1])
+                    if suffix_len <= 0 or total_size == 0:
+                        raise ValueError("Invalid suffix length")
+                    start = max(0, total_size - suffix_len)
+                    end = total_size - 1
+                elif parts[0]:
+                    start = int(parts[0])
+                    end = int(parts[1]) if parts[1] else (total_size - 1)
+                else:
+                    raise ValueError("Empty range bounds")
+                has_valid_range = True
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{total_size}")
+                self.end_headers()
+                return
 
-        if start >= total_size:
+        if total_size == 0 and not has_valid_range:
+            start = 0
+            end = -1
+        elif start < 0 or start >= total_size or end < start:
             self.send_response(416)
             self.send_header("Content-Range", f"bytes */{total_size}")
             self.end_headers()
             return
 
-        end = min(end, total_size - 1)
-        chunk_len = end - start + 1
+        end = min(end, total_size - 1) if total_size > 0 else -1
+        chunk_len = max(0, end - start + 1) if total_size > 0 else 0
 
         filename = file_path.name
         quoted_filename = urllib.parse.quote(filename, safe="")
@@ -711,7 +874,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         disposition_type = "attachment" if is_download else "inline"
         content_disposition = f'{disposition_type}; filename="{ascii_filename}"; filename*=UTF-8\'\'{quoted_filename}'
 
-        if range_header:
+        if has_valid_range:
             self.send_response(206)
             self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
         else:
@@ -722,6 +885,7 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Disposition", content_disposition)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", "no-cache")
+        self._send_security_headers()
         self.end_headers()
 
         # Stream chunk
@@ -777,6 +941,7 @@ class KaffeineWebServer:
         self.port = self.config_mgr.web_server_port
         self.bind_addr = self.config_mgr.web_server_bind
         self.server: Optional[ThreadedHTTPServer] = None
+        self.thread: Optional[threading.Thread] = None
         self.active_tokens: Dict[str, float] = {}
         self.failed_attempts: Dict[str, list] = {}  # ip -> list of timestamps
         self.lockouts: Dict[str, float] = {}        # ip -> lockout until timestamp
@@ -791,6 +956,26 @@ class KaffeineWebServer:
             except Exception as e:
                 print(f"Error in on_queue_changed callback: {e}")
 
+    def _prune_auth_state_locked(self, now: float):
+        """Prunes expired tokens, stale failed login records, and expired lockouts (caller holds self._lock)."""
+        expired_toks = [t for t, exp in self.active_tokens.items() if now >= exp]
+        for t in expired_toks:
+            del self.active_tokens[t]
+
+        expired_locks = [ip for ip, until in self.lockouts.items() if now >= until]
+        for ip in expired_locks:
+            del self.lockouts[ip]
+
+        stale_ips = []
+        for ip, ts_list in self.failed_attempts.items():
+            recent = [t for t in ts_list if now - t < 900]
+            if recent:
+                self.failed_attempts[ip] = recent
+            else:
+                stale_ips.append(ip)
+        for ip in stale_ips:
+            del self.failed_attempts[ip]
+
     def check_rate_limit(self, client_ip: str) -> tuple[bool, int]:
         """
         Check if client_ip is currently locked out from login attempts.
@@ -798,16 +983,10 @@ class KaffeineWebServer:
         """
         now = time.time()
         with self._lock:
-            # Check active lockout
+            self._prune_auth_state_locked(now)
             lockout_until = self.lockouts.get(client_ip, 0)
             if now < lockout_until:
                 return True, int(lockout_until - now) + 1
-            elif lockout_until > 0:
-                del self.lockouts[client_ip]
-
-            # Prune attempts older than 15 minutes (900s)
-            attempts = [t for t in self.failed_attempts.get(client_ip, []) if now - t < 900]
-            self.failed_attempts[client_ip] = attempts
             return False, 0
 
     def record_failed_login(self, client_ip: str, max_attempts: int = 5, lockout_duration: int = 900) -> tuple[int, int]:
@@ -818,6 +997,7 @@ class KaffeineWebServer:
         """
         now = time.time()
         with self._lock:
+            self._prune_auth_state_locked(now)
             attempts = [t for t in self.failed_attempts.get(client_ip, []) if now - t < 900]
             attempts.append(now)
             self.failed_attempts[client_ip] = attempts
@@ -825,7 +1005,7 @@ class KaffeineWebServer:
             if len(attempts) >= max_attempts:
                 lockout_until = now + lockout_duration
                 self.lockouts[client_ip] = lockout_until
-                self.failed_attempts[client_ip] = []
+                self.failed_attempts.pop(client_ip, None)
                 return 0, lockout_duration
             return max(0, max_attempts - len(attempts)), 0
 
@@ -837,11 +1017,24 @@ class KaffeineWebServer:
 
     def create_session_token(self) -> str:
         """Generates a secure random 7-day authentication session token."""
+        now = time.time()
         with self._lock:
+            self._prune_auth_state_locked(now)
+            if len(self.active_tokens) >= MAX_ACTIVE_TOKENS:
+                # Evict oldest-expiring tokens to keep memory bounded
+                oldest = sorted(self.active_tokens.items(), key=lambda kv: kv[1])
+                for old_tok, _ in oldest[: len(self.active_tokens) - MAX_ACTIVE_TOKENS + 1]:
+                    del self.active_tokens[old_tok]
             token = secrets.token_hex(24)
-            # 7-day token expiration
-            self.active_tokens[token] = time.time() + (7 * 86400)
+            self.active_tokens[token] = now + (7 * 86400)
             return token
+
+    def revoke_session_token(self, token: str):
+        """Revokes an active session token immediately."""
+        if not token:
+            return
+        with self._lock:
+            self.active_tokens.pop(token, None)
 
     def is_valid_token(self, token: str) -> bool:
         """Validates that a session token is active and unexpired."""

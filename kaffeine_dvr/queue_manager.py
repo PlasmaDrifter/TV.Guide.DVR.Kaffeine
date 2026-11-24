@@ -103,7 +103,7 @@ class ActiveScheduledMap(dict):
                 continue
             try:
                 r_start = datetime.fromisoformat(r_start_iso)
-                r_end = datetime.fromisoformat(r_end_iso)
+                datetime.fromisoformat(r_end_iso)
             except Exception:
                 continue
 
@@ -1082,7 +1082,7 @@ class QueueManager:
         if not is_timeshift:
             if status == "RECORDING":
                 has_started = True
-            elif status in ("ARMED", "QUEUED"):
+            elif status == "ARMED":
                 try:
                     start_dt = datetime.fromisoformat(rec_data["start_iso"])
                     if now >= start_dt:
@@ -1511,45 +1511,36 @@ class QueueManager:
         fname = Path(file_path_str).name
         stem = Path(file_path_str).stem
 
-        # 1. recording_history: delete unprotected rows matching exact file_path, basename, or path pattern
+        # 1. recording_history: delete unprotected rows matching exact file_path or basename
         cur.execute("""
             DELETE FROM recording_history
             WHERE protected = 0
-              AND (file_path = ? OR file_path = ? OR file_path LIKE ?)
-        """, (file_path_str, fname, f"%/{fname}"))
+              AND (file_path = ? OR file_path = ? OR SUBSTR(file_path, -LENGTH(?)) = ?)
+        """, (file_path_str, fname, f"/{fname}", f"/{fname}"))
 
-        # If no row deleted by file_path, match by title / stem on oldest entry
-        if cur.rowcount == 0:
-            cur.execute("""
-                SELECT id FROM recording_history
-                WHERE protected = 0
-                  AND (title = ? OR ? LIKE (title || '%'))
-                ORDER BY id ASC
-                LIMIT 1
-            """, (stem, stem))
-            row = cur.fetchone()
-            if row:
-                cur.execute("DELETE FROM recording_history WHERE id = ?", (row[0],))
+        # If no row deleted by file_path, match safely by title / stem prefix in Python (avoid LIKE wildcards)
+        if cur.rowcount == 0 and stem:
+            cur.execute("SELECT id, title FROM recording_history WHERE protected = 0 ORDER BY id ASC")
+            for row in cur.fetchall():
+                r_title = (row[1] or "").strip()
+                if r_title and (r_title == stem or stem.startswith(r_title)):
+                    cur.execute("DELETE FROM recording_history WHERE id = ?", (row[0],))
+                    break
 
         # 2. recording_queue: delete matching unprotected rows
         cur.execute("""
             DELETE FROM recording_queue
             WHERE protected = 0
-              AND (file_path = ? OR file_path = ? OR file_path LIKE ?)
-        """, (file_path_str, fname, f"%/{fname}"))
+              AND (file_path = ? OR file_path = ? OR SUBSTR(file_path, -LENGTH(?)) = ?)
+        """, (file_path_str, fname, f"/{fname}", f"/{fname}"))
 
-        if cur.rowcount == 0:
-            cur.execute("""
-                SELECT id FROM recording_queue
-                WHERE protected = 0
-                  AND status = 'COMPLETED'
-                  AND (title = ? OR ? LIKE (title || '%'))
-                ORDER BY id ASC
-                LIMIT 1
-            """, (stem, stem))
-            row = cur.fetchone()
-            if row:
-                cur.execute("DELETE FROM recording_queue WHERE id = ?", (row[0],))
+        if cur.rowcount == 0 and stem:
+            cur.execute("SELECT id, title FROM recording_queue WHERE protected = 0 AND status = 'COMPLETED' ORDER BY id ASC")
+            for row in cur.fetchall():
+                r_title = (row[1] or "").strip()
+                if r_title and (r_title == stem or stem.startswith(r_title)):
+                    cur.execute("DELETE FROM recording_queue WHERE id = ?", (row[0],))
+                    break
 
         conn.commit()
         conn.close()

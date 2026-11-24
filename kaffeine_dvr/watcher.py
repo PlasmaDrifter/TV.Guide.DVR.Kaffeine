@@ -11,7 +11,7 @@ import re
 import subprocess
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Set
 
 from .config import ConfigManager
 from .dbus_client import KaffeineDbusClient
@@ -62,7 +62,7 @@ class Watcher:
         self.storage_mgr = storage_mgr or StorageManager(config_mgr=self.config_mgr, queue_mgr=self.queue_mgr)
         self.running = True
         self.last_sync_time = 0.0
-        self._recovery_attempted = set()
+        self._recovery_attempted: Set[int] = set()
 
     def reap_children(self):
         """Reap any terminated child processes to prevent zombie (<defunct>) processes."""
@@ -188,7 +188,9 @@ class Watcher:
                 r_ch = (rec.get("channel") or "").strip().lower()
                 r_title = (rec.get("title") or "").strip().lower()
                 r_key = rec.get("kaffeine_key")
-                if (r_key and int(r_key) == int(s_id)) or (r_ch == s_ch and (r_title in s_name or s_name in r_title)):
+                if (r_key and int(r_key) == int(s_id)) or (
+                    r_ch == s_ch and bool(r_title) and bool(s_name) and (r_title in s_name or s_name in r_title)
+                ):
                     matching_rec = rec
                     break
 
@@ -218,7 +220,7 @@ class Watcher:
                     for hist in history:
                         h_ch = (hist.get("channel") or "").strip().lower()
                         h_title = (hist.get("title") or "").strip().lower()
-                        if h_ch == s_ch and (h_title in s_name or s_name in h_title):
+                        if h_ch == s_ch and bool(h_title) and bool(s_name) and (h_title in s_name or s_name in h_title):
                             now_str = now.strftime('%Y-%m-%d %H:%M:%S')
                             print(
                                 f"[{now_str}] Stale Recording Watchdog: Halting completed history recording "
@@ -525,7 +527,7 @@ class Watcher:
         self.reap_children()
         if hasattr(self.config_mgr, "reload_if_changed"):
             self.config_mgr.reload_if_changed()
-        cfg = ConfigManager()
+        cfg = self.config_mgr
         # Update in-progress and completed statuses (archive finished to history and actively halt in Kaffeine)
         status_res = self.queue_mgr.update_statuses([], max_history=cfg.max_history_entries, dbus_client=self.dbus_client)
 
@@ -640,7 +642,9 @@ class Watcher:
 
     def check_periodic_sync(self):
         """Periodically sync TV guide listings and evaluate series rules."""
-        cfg = ConfigManager()
+        if hasattr(self.config_mgr, "reload_if_changed"):
+            self.config_mgr.reload_if_changed()
+        cfg = self.config_mgr
         interval_seconds = getattr(cfg, "auto_sync_interval_hours", 6) * 3600
         now = time.time()
 

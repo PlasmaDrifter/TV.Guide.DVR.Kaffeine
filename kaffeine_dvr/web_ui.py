@@ -1171,18 +1171,18 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
           } else if (isFileAvailable) {
             playBtn = `<button class="btn btn-sm" onclick="playByIndex(${idx})">▶ Play</button>`;
           } else if (r.status === "ARMED" || r.status === "QUEUED") {
-            playBtn = `<span class="badge badge-queued">${r.status}</span>`;
+            playBtn = `<span class="badge badge-queued">${escapeHtml(r.status || "")}</span>`;
           } else {
             playBtn = `<span style="color: var(--text-muted); font-size: 0.8rem;">File Unavailable</span>`;
           }
 
           let actionBtn = "";
           if (r.id && r.status === "RECORDING") {
-            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${r.id}, true)">Stop Rec</button>`;
+            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${Number(r.id)}, true)">Stop Rec</button>`;
           } else if (r.id && (r.status === "QUEUED" || r.status === "ARMED")) {
-            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${r.id}, false)">Cancel</button>`;
+            actionBtn = `<button class="btn btn-danger btn-sm" onclick="cancelRecording(${Number(r.id)}, false)">Cancel</button>`;
           } else if (isFileAvailable && r.stream_url) {
-            const rawDlUrl = authToken ? `${r.stream_url}?raw=1&token=${encodeURIComponent(authToken)}` : `${r.stream_url}?raw=1`;
+            const rawDlUrl = escapeHtml(`${r.stream_url}?raw=1`);
             const dlName = escapeHtml(r.filename || ((r.title || "recording").trim().replace(/[/\\?%*:|"<>]/g, '_') + ".m2t"));
             actionBtn = `<a href="${rawDlUrl}" download="${dlName}" class="btn btn-secondary btn-sm" style="text-decoration: none; padding: 4px 8px; font-size: 0.75rem;">Download</a>`;
           }
@@ -1248,13 +1248,10 @@ WEB_HTML_TEMPLATE = """<!DOCTYPE html>
         dlLink.removeAttribute("download");
       }
 
-      // Stream URL (MP4 stream)
-      const streamUrl = authToken ? `${url}?token=${encodeURIComponent(authToken)}` : url;
-      // Direct raw file download URL
-      const rawUrl = authToken ? `${url}?raw=1&token=${encodeURIComponent(authToken)}` : `${url}?raw=1`;
-      dlLink.href = rawUrl;
+      // Stream URL (MP4 stream) and direct raw download URL authenticate via HttpOnly session cookie
+      dlLink.href = `${url}?raw=1`;
 
-      video.src = streamUrl;
+      video.src = url;
       modal.classList.add("active");
       video.play().catch(() => {});
     }

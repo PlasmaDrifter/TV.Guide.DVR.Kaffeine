@@ -103,7 +103,9 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
         self._send_security_headers()
         if extra_headers:
             for hk, hv in extra_headers:
-                self.send_header(hk, hv)
+                safe_hk = str(hk).replace("\r", "").replace("\n", "")
+                safe_hv = str(hv).replace("\r", "").replace("\n", "")
+                self.send_header(safe_hk, safe_hv)
         self.end_headers()
         self.wfile.write(body)
 
@@ -518,8 +520,10 @@ class KaffeineWebRequestHandler(http.server.BaseHTTPRequestHandler):
                     and SESSION_COOKIE_NAME not in self.headers.get("Cookie", "")
                 ):
                     tok = auth_hdr[7:].strip()
-                    if self.server_obj.is_valid_token(tok):
-                        extra_hdrs = [("Set-Cookie", f"{SESSION_COOKIE_NAME}={tok}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")]
+                    canonical_tok = self.server_obj.get_valid_token(tok)
+                    if canonical_tok:
+                        safe_tok = canonical_tok.replace("\r", "").replace("\n", "")
+                        extra_hdrs = [("Set-Cookie", f"{SESSION_COOKIE_NAME}={safe_tok}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800")]
                 self._send_json({
                     "status": "online",
                     "free_disk_gb": free_gb,
@@ -1036,15 +1040,24 @@ class KaffeineWebServer:
         with self._lock:
             self.active_tokens.pop(token, None)
 
+    def get_valid_token(self, token: str) -> Optional[str]:
+        """Returns the stored server-side session token if active and unexpired."""
+        if not token:
+            return None
+        now = time.time()
+        with self._lock:
+            for stored_tok in list(self.active_tokens.keys()):
+                if secrets.compare_digest(stored_tok, token):
+                    exp = self.active_tokens.get(stored_tok, 0.0)
+                    if now < exp:
+                        return stored_tok
+                    del self.active_tokens[stored_tok]
+                    return None
+            return None
+
     def is_valid_token(self, token: str) -> bool:
         """Validates that a session token is active and unexpired."""
-        with self._lock:
-            exp = self.active_tokens.get(token)
-            if exp and time.time() < exp:
-                return True
-            if exp:
-                del self.active_tokens[token]
-            return False
+        return self.get_valid_token(token) is not None
 
     def is_running(self) -> bool:
         """Returns True if the background web server thread is currently executing."""

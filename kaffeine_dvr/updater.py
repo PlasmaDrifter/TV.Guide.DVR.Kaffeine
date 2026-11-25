@@ -95,6 +95,11 @@ def get_pip_flags() -> list:
 
 
 EMBEDDED_RELEASE_NOTES: Dict[str, str] = {
+    "0.9.9": (
+        "## What's Changed in v0.9.9\n\n"
+        "- **Cross-Distro Qt6 Startup & Packaging Fix**: Initialized `QApplication` directly with `QT_STYLE_OVERRIDE=Fusion` (restoring the environment variable immediately afterward so external players keep native host themes) and stripped host Plasma Union style plugins (`UnionWidgetsStyle.so*`, `libUnion*.so*`) from AppImage, DEB, and RPM bundles, preventing startup `SIGSEGV` crashes on distributions without Plasma Union (such as Ubuntu 26.04).\n"
+        "- **Web Companion Header & Session Token Hardening**: Sanitized extra HTTP response headers against CR/LF injection and used canonical server-side session tokens via constant-time `secrets.compare_digest` lookup when setting session cookies."
+    ),
     "0.9.8": (
         "## What's Changed in v0.9.8\n\n"
         "- **Web Companion Security Hardening**: Tightened recording-folder containment checks on completed and active streams, restricted `/api/timeshift/stop` to verified timeshift sessions, failed closed on non-loopback binds without a password, added `HttpOnly` `SameSite=Strict` cookie sessions, CSRF `Origin` checks, security headers, 1 MB POST body limits, and safe RFC 7233 `Range` parsing.\n"

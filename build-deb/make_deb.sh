@@ -25,9 +25,12 @@ mkdir -p "$DEB_ROOT/usr/lib/systemd/user"
 # Copy binary bundle
 cp -r dist/kaffeine-dvr/* "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/"
 
-# Remove bundled libfontconfig to avoid conflicts on host distributions
+# Remove bundled libfontconfig and host Plasma Union style plugins to avoid cross-distro crashes
 rm -f "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/libfontconfig.so"*
 rm -f "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/_internal/libfontconfig.so"*
+rm -f "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/libUnion"*.so*
+rm -f "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/_internal/libUnion"*.so*
+rm -f "$DEB_ROOT/opt/TV.Guide.DVR.Kaffeine/_internal/PyQt6/Qt6/plugins/styles/UnionWidgetsStyle.so"*
 
 # Bundle CA certificate fallback if available
 if [ -f "assets/cacert.pem" ]; then

@@ -27,9 +27,12 @@ mkdir -p "$STAGE_DIR/usr/lib/systemd/user"
 
 cp -r dist/kaffeine-dvr/* "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/"
 
-# Remove bundled libfontconfig to prevent conflicts
+# Remove bundled libfontconfig and host Plasma Union style plugins to prevent conflicts
 rm -f "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/libfontconfig.so"*
 rm -f "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/_internal/libfontconfig.so"*
+rm -f "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/libUnion"*.so*
+rm -f "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/_internal/libUnion"*.so*
+rm -f "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/_internal/PyQt6/Qt6/plugins/styles/UnionWidgetsStyle.so"*
 
 if [ -f "assets/cacert.pem" ]; then
     cp assets/cacert.pem "$STAGE_DIR/opt/TV.Guide.DVR.Kaffeine/"

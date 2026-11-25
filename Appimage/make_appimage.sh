@@ -26,8 +26,12 @@ if [ -d AppDir/usr/bin/_internal ]; then
     cp RELEASE_NOTES.md AppDir/usr/bin/_internal/ 2>/dev/null || true
     # Remove bundled libfontconfig to prevent SIGSEGV on Debian/Ubuntu/Kubuntu due to cache format mismatches
     rm -f AppDir/usr/bin/_internal/libfontconfig.so*
+    # Remove host Plasma Union style plugins that SIGSEGV on distributions without Plasma Union
+    rm -f AppDir/usr/bin/_internal/PyQt6/Qt6/plugins/styles/UnionWidgetsStyle.so*
+    rm -f AppDir/usr/bin/_internal/libUnion*.so*
 fi
 rm -f AppDir/usr/bin/libfontconfig.so*
+rm -f AppDir/usr/bin/libUnion*.so*
 
 # Icons
 cp assets/kaffeine-dvr.svg AppDir/kaffeine-dvr.svg

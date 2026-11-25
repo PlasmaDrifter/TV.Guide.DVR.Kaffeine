@@ -72,3 +72,62 @@ def test_get_display_env_removes_ld_library_path_if_only_appimage_paths(monkeypa
 
     env = client._get_display_env()
     assert "LD_LIBRARY_PATH" not in env
+
+
+def test_gui_main_initializes_fusion_style_and_restores_env(monkeypatch):
+    """Verify gui.main sets QT_STYLE_OVERRIDE=Fusion for QApplication startup and restores it afterward."""
+    import os
+    import sys
+
+    import kaffeine_dvr.gui as gui_mod
+
+    observed = {}
+
+    class DummyApp:
+        def __init__(self, argv):
+            observed["style_during_init"] = os.environ.get("QT_STYLE_OVERRIDE")
+
+        def installEventFilter(self, filt):
+            pass
+
+        def removeEventFilter(self, filt):
+            pass
+
+        def setApplicationName(self, name):
+            pass
+
+        def setApplicationDisplayName(self, name):
+            pass
+
+        def setDesktopFileName(self, name):
+            pass
+
+        def setWindowIcon(self, icon):
+            pass
+
+        def exec(self):
+            return 0
+
+    class DummyWindow:
+        def show(self):
+            pass
+
+    monkeypatch.setattr(sys, "argv", ["kaffeine-dvr"])
+    monkeypatch.setattr(gui_mod, "QApplication", DummyApp)
+    monkeypatch.setattr(gui_mod, "ensure_desktop_launcher", lambda: None)
+    monkeypatch.setattr(gui_mod, "ensure_systemd_service", lambda: True)
+    monkeypatch.setattr(gui_mod, "NoWheelEventFilter", lambda app: object())
+    monkeypatch.setattr(gui_mod, "get_app_icon", lambda: object())
+    monkeypatch.setattr(gui_mod, "setup_dark_theme", lambda app: None)
+    monkeypatch.setattr(gui_mod, "MainWindow", DummyWindow)
+    monkeypatch.setattr(os, "_exit", lambda code: None)
+
+    monkeypatch.delenv("QT_STYLE_OVERRIDE", raising=False)
+    gui_mod.main()
+    assert observed["style_during_init"] == "Fusion"
+    assert "QT_STYLE_OVERRIDE" not in os.environ
+
+    monkeypatch.setenv("QT_STYLE_OVERRIDE", "Breeze")
+    gui_mod.main()
+    assert observed["style_during_init"] == "Fusion"
+    assert os.environ.get("QT_STYLE_OVERRIDE") == "Breeze"

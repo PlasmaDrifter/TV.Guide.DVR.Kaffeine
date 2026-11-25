@@ -1,5 +1,10 @@
 # Release Notes
 
+## v0.9.9
+
+- **Cross-Distro Qt6 Startup & Packaging Fix**: Initialized `QApplication` directly with `QT_STYLE_OVERRIDE=Fusion` (restoring the environment variable immediately afterward so external players keep native host themes) and stripped host Plasma Union style plugins (`UnionWidgetsStyle.so*`, `libUnion*.so*`) from AppImage, DEB, and RPM bundles, preventing startup `SIGSEGV` crashes on distributions without Plasma Union (such as Ubuntu 26.04).
+- **Web Companion Header & Session Token Hardening**: Sanitized extra HTTP response headers against CR/LF injection and used canonical server-side session tokens via constant-time `secrets.compare_digest` lookup when setting session cookies.
+
 ## v0.9.8
 
 - **Web Companion Security Hardening**: Tightened file containment checks across both completed and active stream endpoints using `Path.is_relative_to()`, restricted `/api/timeshift/stop` to verified timeshift sessions, enforced fail-closed authentication when bound to non-loopback addresses without a password, added `HttpOnly` `SameSite=Strict` cookie sessions with `POST /api/logout`, added CSRF `Origin` validation and HTTP security headers, capped `POST` body sizes, properly handled malformed and suffix `Range` headers, and removed `?token=` URL parameters from browser media/download links.

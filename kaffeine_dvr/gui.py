@@ -17625,7 +17625,16 @@ def main():
         cli_main()
         return
 
-    app = QApplication(sys.argv)
+    # Initialize Qt directly with Fusion before QApplication probes host style plugins (e.g. UnionWidgetsStyle)
+    orig_style_override = os.environ.get("QT_STYLE_OVERRIDE")
+    os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
+    try:
+        app = QApplication(sys.argv)
+    finally:
+        if orig_style_override is None:
+            os.environ.pop("QT_STYLE_OVERRIDE", None)
+        else:
+            os.environ["QT_STYLE_OVERRIDE"] = orig_style_override
     ensure_desktop_launcher()
     ensure_systemd_service()
     wheel_filter = NoWheelEventFilter(app)
